@@ -67,7 +67,7 @@ NAO_negative_dates = filter(NAO, binary_thres!=TRUE)[['date']]
 
 
 # ------------------------------------------------------------------------------
-# GET ATTRIBUTATION FRACTION DATA FOR EACH REGION 
+# GET ATTRIBUTABLE FRACTION DATA FOR EACH NAO PHASE
 # ------------------------------------------------------------------------------
 
 n_simu = 1000
@@ -75,68 +75,66 @@ n_groups = length(temp_groups)
 n_regions = length(info_region$code)  
 col_names = c( sprintf("simu_%s", seq(1:n_simu)), list("attr") )
 
-AF   = array( NA, dim  =    c( n_regions,        n_groups,    n_threshold,  1+n_simu ),
-              dimnames = list( info_region$code, temp_groups, thresholds,  col_names ) )
+AF   = array( NA, dim  =    c( n_regions,        1+n_simu,  n_threshold, n_groups    ),
+              dimnames = list( info_region$code, col_names, thresholds,  temp_groups ) )
 ttest_pval = wcox_pval = array( NA, dim  =    c( n_regions,        n_groups),
                                 dimnames = list( info_region$code, temp_groups) )
 
 # both .rds and parquet are missing date rownames
-# parquet is also missing the region name
 # TO DO - so many dates variable seem unnecessary, review and refactor
 all_dates = seq(as.Date(CONFIG$NUTS_STARTDATE), as.Date(CONFIG$NUTS_ENDDATE), 1)
 
-foldout_attr = paste0( foldout, "AF_ts_simu/" ) # TO DO - MOVE FOLDER NAME TO CONFIG
+# foldname = "AF_ts_simu_pqt/" # parquet is also missing region name
+foldname = "AF_ts_simu/"  
+foldout_attr = paste0( foldout, foldname ) # TO DO - MOVE FOLDER NAME TO CONFIG
 attr_files = list.files(foldout_attr)
-# parqt_folder = paste0(foldout, "AF_ts_simu_pqt/")
-# parqt_files = list.files( paste0(foldout, "AF_ts_simu_pqt") )
 # test = read_parquet(paste0(parqt_folder, parqt_files[200])) 
 
-# ?? Is it faster is sapply is used?
-
-start_time = Sys.time();
-
-for (file in attr_files) {
+start_time = Sys.time()
+for (r in 1:n_regions){
   
-  reg = gsub("\\.rds$", "", file)
-  r = which(info_region$code==reg)
-  print( paste0( "  Region ", r, " / ", n_regions, ": ", info_region$name[r], " (", info_region$code[r], ")" ) )
+  reg = info_region$code[r]
+  print( paste0( "  Region ", r, " / ", n_regions, ": ", info_region$name[r], " (", reg, ")" ) ) 
+  attributions = readRDS(paste0(foldout_attr, reg, ".rds"))
   
-  attributions = readRDS( paste0(foldout_attr, file) )
   rownames(attributions) = all_dates
   
-  for (g in 1:n_groups) {
-    
-    g_col = temp_groups[g]
-    row_idx = which(attributions[[g_col]] == TRUE)
-    dates = as.Date( rownames(attributions)[row_idx] )
-    
-    df = attributions[row_idx, 1:(n_simu+1)]
-    if ( nrow(df)>1 ) {
-      rownames(df) = dates
-      positive_df = filter(df, dates %in% NAO_positive_dates)
-      negative_df = filter(df, dates %in% NAO_negative_dates)
-      
-      AF[r,g,1, ] = colMeans(positive_df, na.rm=TRUE)
-      AF[r,g,2, ] = colMeans(negative_df, na.rm=TRUE)
-      
-      # h0 - no difference (equal mean)
-      # reject h0 if pval less than sig level
-      ttest_stat = t.test(AF[r,g,1, ], AF[r,g,2, ], 
-                         var.equal = FALSE,  # diff are norm dist 
-                         paired    = TRUE,   # are each simulations same subject? 
-                         alternative="two.sided") # !=
-      ttest_pval[r,g] = ttest_stat$p.value 
-      
-      wcox_stat = wilcox.test(AF[r,g,1, ], AF[r,g,2, ], 
-                              paired=TRUE,
-                              alternative="two.sided") 
-      wcox_pval[r,g] = ttest_stat$p.value
-    }
-  }
+  AF[r,,,] = sapply(temp_groups, get_phases, attributions, NAO_positive_dates, NAO_negative_dates, simplify="array") # 1001x2x7
+  ttest_pval[r,] = apply( test, 3, function(x) get_pval(x[,1], x[,2] ) )   # 1x7
+  wcox_pval[r,]  = apply( test, 3, function(x) get_pval(x[,1], x[,2], test_type="Wilcox" ) ) # 1x7 
 }
+end_time = Sys.time()
+print(end_time-start_time)
 
-end_time = Sys.time();
-print(end_time-start_time);
+# for (g in 1:n_groups) {
+#   
+#   g_col = temp_groups[g]
+#   row_idx = which(attributions[[g_col]] == TRUE)
+#   dates = as.Date( rownames(attributions)[row_idx] )
+#   
+#   df = attributions[row_idx, 1:(n_simu+1)]
+#   if ( nrow(df)>1 ) {
+#     rownames(df) = dates
+#     positive_df = filter(df, dates %in% NAO_positive_dates)
+#     negative_df = filter(df, dates %in% NAO_negative_dates)
+#     
+#     AF[r,g,1, ] = colMeans(positive_df, na.rm=TRUE)
+#     AF[r,g,2, ] = colMeans(negative_df, na.rm=TRUE)
+#     
+#     # h0 - no difference (equal mean)
+#     # reject h0 if pval less than sig level
+#     ttest_stat = t.test(AF[r,g,1, ], AF[r,g,2, ], 
+#                        var.equal = FALSE,  # diff are norm dist 
+#                        paired    = TRUE,   # are each simulations same subject? 
+#                        alternative="two.sided") # !=
+#     ttest_pval[r,g] = ttest_stat$p.value 
+#     
+#     wcox_stat = wilcox.test(AF[r,g,1, ], AF[r,g,2, ], 
+#                             paired=TRUE,
+#                             alternative="two.sided") 
+#     wcox_pval[r,g] = ttest_stat$p.value
+#   }
+# }
 
 # apply(pval, 2, FUN=function(x) {length(x[x<=0.05])/length(x)})
 # apply(pval, 2, function(x) table(x<0.05))
@@ -146,30 +144,35 @@ saveRDS(AF, paste0(foldout, "AF_NAO", scaled, "2.rds"))
 saveRDS(ttest_pval, paste0(foldout, "ttest_pval_AF_NAO", scaled, ".rds"))
 saveRDS(wcox_pval, paste0(foldout, "wcox_pval_AF_NAO", scaled, ".rds"))
 
-# ---------------------------------------
-# run with sapply ??
-# data = attributions
-# temp_grp = "Total"
-# pos_dates = NAO_positive_dates
-# neg_dates = NAO_negative_dates
-# 
-# get_phases <- function(temp_grp, data, pos_dates, neg_dates, n_simu=1000){
-#   
-#   row_idx = which(data[[temp_grp]]==TRUE)
-#   dates = as.Date( rownames(data)[row_idx] )
-#   data = data[ row_idx, 1:(n_simu+1) ]
-# 
-#   if ( nrow(data)>1 ) {
-#     rownames(data) = dates
-#     pos_df = colMeans( filter(data, dates %in% pos_dates), na.rm=TRUE)
-#     neg_df = colMeans( filter(data, dates %in% neg_dates), na.rm=TRUE)
-# 
-#     combined = cbind( pos_df,neg_df )
-#   }
-#   return(combined)
-# }
-# test = sapply(temp_groups, get_phases, attributions, NAO_positive_dates, NAO_negative_dates, simplify=FALSE) # 7x2x1000
-# test_stat = lapply( test, function(x) t.test(x ~ y, var.equal = FALSE, paired = TRUE, alternative="two.sided") )
+# TO DO MOVE WRAPPER FUNCTIONS TO ANOTHER FILE
+# ----------------------------------------------
+
+get_phases <- function(temp_grp, data, pos_dates, neg_dates, n_simu=1000){
+
+  row_idx = which(data[[temp_grp]]==TRUE)
+  dates = as.Date( rownames(data)[row_idx] )
+  data = data[ row_idx, 1:(n_simu+1) ]
+
+  if ( nrow(data)>1 ) {
+    rownames(data) = dates
+    pos_df = colMeans( filter(data, dates %in% pos_dates), na.rm=TRUE)
+    neg_df = colMeans( filter(data, dates %in% neg_dates), na.rm=TRUE)
+    combined = cbind( pos_df, neg_df )
+  }
+  
+  return(combined)
+}
+# test = sapply(temp_groups, get_phases, attributions, NAO_positive_dates, NAO_negative_dates, simplify="array") # 1001x2x7
+
+get_pval <- function(x, y, test_type="Student-t", paired=TRUE, alternative="two.sided"){
+  if (test_type=="Student-t"){
+    pval = t.test(x, y, var.equal=FALSE, paired=paired, alternative=alternative)$p.value
+  } else if (test_type=="Wilcox") {
+    pval = wilcox.test(x, y, paired=paired, alternative=alternative)$p.value
+  }
+  return(pval)
+}
+# ttest_stat = apply( test, 3, function(x) get_pval(x[,1], x[,2] ) )
 
 
 # ------------------------------------------------------------------------------
