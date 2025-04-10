@@ -9,14 +9,6 @@
 # ------------------------------------------------------------------------------
 
 
-# start_time = Sys.time();
-# end_time = Sys.time();
-# print(end_time-start_time);
-
-# rm( list = ls() );
-# cat("\014");
-
-
 # ------------------------------------------------------------------------------
 # REQUIRED LIBRARIES, FUNCTIONS AND CONFIG
 # ------------------------------------------------------------------------------
@@ -229,7 +221,7 @@ for( i in 1:length(coeff) ) {
   print( paste0("Mixmeta AIC & BIC ", model_summary$AIC, model_summary$BIC ) )
   
   # 3. wald test of the predictors of mixmeta model
-  if( length(mixmeta_coeff)  > 1 ) { # ?? why would number of coefficients be less than 1? in fact why would not be the same as in our formula?
+  if( length(mixmeta_coeff)  > 1 ) { 
     for( p in 1:length(mixmeta_coeff)  ) {
       fwald_estimate = FWALD(mvar_postmeta[[i]], mixmeta_coeff[p])
       print(paste0("  Wald Test of ", mixmeta_coeff[p], ": p = ", 

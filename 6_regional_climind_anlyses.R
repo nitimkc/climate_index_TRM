@@ -22,8 +22,6 @@
 if (!require("pacman")) install.packages("pacman")
 suppressMessages( pacman::p_load(config, tidyverse, giscoR, lwgeom, sf, tmap, grid) )
 
-source("maps_EU.R")                 # Check and process read data
-
 CONFIG <- config::get()
 
 
@@ -48,6 +46,8 @@ foldout = paste0( FOLD_DATA_OUT, foldout_name)
 # load required outputs from previous runs
 info_region  = readRDS( paste0(foldout, "info_region.rds") )
 
+# temperature groups
+temp_groups = strsplit(CONFIG$TEMP_RANGE, ",")[[1]]
 
 # ------------------------------------------------------------------------------
 # READ INDEX DATA AND PREPROCESS
@@ -75,10 +75,10 @@ n_groups = length(temp_groups)
 n_regions = length(info_region$code)  
 col_names = c( sprintf("simu_%s", seq(1:n_simu)), list("attr") )
 
-AF     = array( NA, dim  =    c( n_regions,        n_groups,    n_threshold,  1+n_simu ),
-                dimnames = list( info_region$code, temp_groups, thresholds,  col_names ) )
-test_sig = array( NA, dim  =    c( n_regions,        n_groups),
-                  dimnames = list( info_region$code, temp_groups) )
+AF   = array( NA, dim  =    c( n_regions,        n_groups,    n_threshold,  1+n_simu ),
+              dimnames = list( info_region$code, temp_groups, thresholds,  col_names ) )
+ttest_pval = wcox_pval = array( NA, dim  =    c( n_regions,        n_groups),
+                                dimnames = list( info_region$code, temp_groups) )
 
 # both .rds and parquet are missing date rownames
 # parquet is also missing the region name
@@ -93,7 +93,7 @@ attr_files = list.files(foldout_attr)
 
 # ?? Is it faster is sapply is used?
 
-# start_time = Sys.time();
+start_time = Sys.time();
 
 for (file in attr_files) {
   
@@ -105,41 +105,71 @@ for (file in attr_files) {
   rownames(attributions) = all_dates
   
   for (g in 1:n_groups) {
+    
     g_col = temp_groups[g]
+    row_idx = which(attributions[[g_col]] == TRUE)
+    dates = as.Date( rownames(attributions)[row_idx] )
     
-    df_idx = which(attributions[[g_col]] == TRUE)
-    dates = as.Date( rownames(attributions)[df_idx] )
-    
-    df = attributions[df_idx, 1:(n_simu+1)]
+    df = attributions[row_idx, 1:(n_simu+1)]
     if ( nrow(df)>1 ) {
       rownames(df) = dates
-      
       positive_df = filter(df, dates %in% NAO_positive_dates)
       negative_df = filter(df, dates %in% NAO_negative_dates)
       
-      AF[r,g,1, ] = colMeans(positive_df, na.rm=TRUE); AF[r,g,2, ] = colMeans(negative_df, na.rm=TRUE)
+      AF[r,g,1, ] = colMeans(positive_df, na.rm=TRUE)
+      AF[r,g,2, ] = colMeans(negative_df, na.rm=TRUE)
+      
       # h0 - no difference (equal mean)
-      test_stat = t.test(AF[r,g,1, ], AF[r,g,2, ], 
-                         var.equal=TRUE, 
-                         paired = TRUE, 
-                         alternative="two.sided") # paired argument
-      pval[r,g] = test_stat$p.value
-      test_sig[r,g] = pval[r,g] <= 0.05   # reject h0 if pval less than sig level
-      print(paste0(temp_groups[g], " ",  test_stat$p.value > 0.05))
+      # reject h0 if pval less than sig level
+      ttest_stat = t.test(AF[r,g,1, ], AF[r,g,2, ], 
+                         var.equal = FALSE,  # diff are norm dist 
+                         paired    = TRUE,   # are each simulations same subject? 
+                         alternative="two.sided") # !=
+      ttest_pval[r,g] = ttest_stat$p.value 
+      
+      wcox_stat = wilcox.test(AF[r,g,1, ], AF[r,g,2, ], 
+                              paired=TRUE,
+                              alternative="two.sided") 
+      wcox_pval[r,g] = ttest_stat$p.value
     }
   }
 }
 
-# end_time = Sys.time();
-# print(end_time-start_time);
+end_time = Sys.time();
+print(end_time-start_time);
 
-apply(pval, 2, FUN=function(x) {length(x[x<0.05])/length(x)})
-apply(test_sig, 2, function(x) table(x<0.05))
+# apply(pval, 2, FUN=function(x) {length(x[x<=0.05])/length(x)})
+# apply(pval, 2, function(x) table(x<0.05))
 
-# scaled = ifelse(CONFIG$CLIM_IND_SCALED==TRUE, "_zscaled", "")
-# saveRDS(AF, paste0(foldout, "AF_NAO", scaled, ".rds"))
-# saveRDS(pval, paste0(foldout, "pval_AF_NAO", scaled, ".rds"))
-# saveRDS(test_sig, paste0(foldout, "test_sig_AF_NAO", scaled, ".rds"))
+scaled = ifelse(CONFIG$CLIM_IND_SCALED==TRUE, "_zscaled", "")
+saveRDS(AF, paste0(foldout, "AF_NAO", scaled, "2.rds"))
+saveRDS(ttest_pval, paste0(foldout, "ttest_pval_AF_NAO", scaled, ".rds"))
+saveRDS(wcox_pval, paste0(foldout, "wcox_pval_AF_NAO", scaled, ".rds"))
+
+# ---------------------------------------
+# run with sapply ??
+# data = attributions
+# temp_grp = "Total"
+# pos_dates = NAO_positive_dates
+# neg_dates = NAO_negative_dates
+# 
+# get_phases <- function(temp_grp, data, pos_dates, neg_dates, n_simu=1000){
+#   
+#   row_idx = which(data[[temp_grp]]==TRUE)
+#   dates = as.Date( rownames(data)[row_idx] )
+#   data = data[ row_idx, 1:(n_simu+1) ]
+# 
+#   if ( nrow(data)>1 ) {
+#     rownames(data) = dates
+#     pos_df = colMeans( filter(data, dates %in% pos_dates), na.rm=TRUE)
+#     neg_df = colMeans( filter(data, dates %in% neg_dates), na.rm=TRUE)
+# 
+#     combined = cbind( pos_df,neg_df )
+#   }
+#   return(combined)
+# }
+# test = sapply(temp_groups, get_phases, attributions, NAO_positive_dates, NAO_negative_dates, simplify=FALSE) # 7x2x1000
+# test_stat = lapply( test, function(x) t.test(x ~ y, var.equal = FALSE, paired = TRUE, alternative="two.sided") )
 
 
 # ------------------------------------------------------------------------------

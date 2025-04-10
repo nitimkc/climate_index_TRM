@@ -9,14 +9,6 @@
 # ------------------------------------------------------------------------------
 
 
-# start_time = Sys.time();
-# end_time = Sys.time();
-# print(end_time-start_time);
-
-# rm( list = ls() );
-# cat("\014");
-
-
 # ------------------------------------------------------------------------------
 # REQUIRED LIBRARIES, FUNCTIONS AND CONFIG
 # ------------------------------------------------------------------------------
@@ -24,7 +16,7 @@ if (!require("pacman")) install.packages("pacman")
 pacman::p_load(config, arrow)
 
 source("exposure_lag_response.R")         # dlnm wrappers
-source("attributable_morality.R")         # dlnm wrappers
+source("attributable_morality.R")         # attr wrappers
 
 CONFIG <- config::get() 
 
@@ -53,7 +45,7 @@ calib_mort_temp = readRDS( paste0(foldout, "calib_mort_temp.rds") )
 blup_postmeta   = readRDS( paste0(foldout, "blup_postmeta.rds") )
 MMT_postmeta    = readRDS( paste0(foldout, "MMT_postmeta.rds") )
 pred_mort_temp  = readRDS( paste0(foldout, "pred_mort_temp.rds") )   # mort reqd. for AN
-pred_temp_MOV   = readRDS( paste0(foldout, "pred_temp_MOV.rds") )    # AF when mort not avaible
+pred_temp_MOV   = readRDS( paste0(foldout, "pred_temp_MOV.rds") )    # AF when mort not avail.
 
 # Three curves required - 
 #   1. Exposure-Response Function (ERF) - Cumulative 
@@ -81,7 +73,7 @@ temp_knots = strtoi(strsplit(CONFIG$TEMP_KNOTS, ",")[[1]]) / 100
 # others
 ATTR_PERIOD = strsplit(CONFIG$ATTRIBUTION_PERIOD, ",")[[1]]
 temp_groups = strsplit(CONFIG$TEMP_RANGE, ",")[[1]]
-conf_int = c(0.025,0.975); # two-tailed 95% Confidence Interval # MOVE TO CONFIG LATER
+conf_int = c(0.025,0.975); # two-tailed 95% Confidence Interval # TO DO move to config
 
 
 # ------------------------------------------------------------------------------
@@ -126,7 +118,7 @@ if( "Whole Period" %in% ATTR_PERIOD ){
     avg_lagged_mort = rowMeans( lagged_mort, na.rm = FALSE )                # t x 1 (entire period incl. NAs)
   
     i = 1 # for CUM. ERF
-    # ADD COMMENT
+    # TO DO ADD COMMENT
     AN_ts_simu = simulated_attributable_values(ob_temp_centered,
                                                blup_postmeta[[i]][[r]]$blup,
                                                blup_postmeta[[i]][[r]]$vcov,
@@ -138,7 +130,7 @@ if( "Whole Period" %in% ATTR_PERIOD ){
     time_idx = 1:length( data_pred$date )
     N = length(time_idx)
     if( N <= 0 ){ stop( paste0("No time period selected for region - ", r) ); } # when will this condition exist?
-    rownames(AN_ts_simu) = data_pred$date #format(time_idx, "%Y-%m-%d")
+    rownames(AN_ts_simu) = data_pred$date                                       # format(time_idx, "%Y-%m-%d")
   
     # average deaths across lags not counting NAs unlike lagged_mort
     AF_adj_factor    = sum(      avg_lagged_mort[time_idx]                           , na.rm=TRUE );
@@ -192,9 +184,9 @@ if('NUTS' %in% ATTR_PERIOD){
   
   pred_thresholds_MOV = sapply( pred_temp_MOV, function(x) quantile( x$temp, conf_int, na.rm = TRUE ) )
   
-  test = array( NA, dim=c(n_regions,n_simu+1,n_groups), dimnames=list(info_region$code,col_names,temp_groups) )
-  
+  # attr_frac = array( NA, dim=c(n_regions,n_simu+1,n_groups), dimnames=list(info_region$code,col_names,temp_groups) )
   # attr_frac too large object to save in memory
+  
   # foldout_attr = paste0( foldout, "AF_ts_simu" )
   foldout_attr = paste0( foldout, "AF_ts_simu_pqt" ) # TO DO - MOVE FOLDER NAME TO CONFIG
   if( !file_test( "-d", foldout_attr ) ){ dir.create( file.path(foldout_attr)); }
@@ -216,7 +208,6 @@ if('NUTS' %in% ATTR_PERIOD){
     AF_ts_simu = simulated_attributable_values(ob_temp_centered,
                                                blup_postmeta[[i]][[r]]$blup,
                                                blup_postmeta[[i]][[r]]$vcov,
-                                               
                                                CONFIG$SEED, n_simu,
                                                CONFIG$LOCAL_MIN_MMT,
                                                min_PMMT, max_PMMT,
@@ -226,13 +217,13 @@ if('NUTS' %in% ATTR_PERIOD){
     
     # Attributions for each temperature range group
     idx_groups = sapply(temp_groups, group_threshold, data_pred$temp, MMT_postmeta[[r]], pred_thresholds_MOV[,r], 1:n_periods)
-    filter_cols = array(FALSE, dim = c(n_periods,n_groups), dimnames = list(periods, temp_groups))
+    filter_cols = array(FALSE, dim=c(n_periods,n_groups), dimnames=list(periods, temp_groups))
     for (g in 1:n_groups) { filter_cols[idx_groups[[g]] , g] = TRUE }
-
     AF_ts_simu = do.call(dplyr::bind_cols, list(AF_ts_simu, filter_cols)) 
+    
     pqt_filepath = tempfile(tmpdir=foldout_attr, fileext=".gzip.parquet")
-    write_parquet(AF_ts_simu, sink=pqt_filepath, compression="gzip") # faster than snappy
-    # saveRDS( AF_ts_simu, paste0(foldout_attr, info_region$code[r], ".rds") ) # current saved versions do not have rownames
+    write_parquet(AF_ts_simu, sink=pqt_filepath, compression="gzip")           # faster than snappy
+    # saveRDS( AF_ts_simu, paste0(foldout_attr, info_region$code[r], ".rds") ) # TO DO current saved versions do not have rownames add if re-run
   }
   rm(filter_cols, AF_ts_simu)
   end = Sys.time()

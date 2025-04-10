@@ -22,7 +22,7 @@
 if (!require("pacman")) install.packages("pacman")
 suppressMessages( pacman::p_load(config, giscoR, lwgeom, sf, tmap, grid) )
 
-source("maps_EU.R")                 # Check and process read data
+source("maps_EU.R")                 # build maps for specific regions
 
 CONFIG <- config::get()
 
@@ -55,8 +55,8 @@ info_region  = readRDS( paste0(foldout, "info_region.rds") )
 
 scaled = ifelse(CONFIG$CLIM_IND_SCALED==TRUE, "_zscaled", "")
 AF_NAO = readRDS( paste0(foldout, "AF_NAO", scaled, ".rds") )
-t_stat = readRDS( paste0(foldout, "t_stat_AF_NAO", scaled, ".rds") )
-sig = t_stat > 0.05
+pval = readRDS( paste0(foldout, "pval_AF_NAO", scaled, ".rds") )
+sig = pval <= 0.05
 print(colSums(sig, na.rm=TRUE))
 colnames(sig) = paste0("sig ", colnames(sig))
 
@@ -109,6 +109,8 @@ for (or in 1:length(other_regions)){
 # ------------------------------------------------------------------------------
 
 # diff when not scaled, scaled and detrended
+start_time = Sys.time()
+
 g = 1
 attr = AF_NAO[,g,,1001]
 plot_df = as.data.frame( cbind( attr, "diff"=attr[,2]-attr[,1] ) )
@@ -136,9 +138,11 @@ vp_list = list(viewport(x=0.12, y=0.80, width=0.15, height=0.15),
                viewport(x=0.14, y=0.65, width=0.20, height=0.20),
                viewport(x=0.10, y=0.45, width=0.20, height=0.20),
                viewport(x=0.10, y=0.28, width=0.10, height=0.10))
-plotfname = paste0(foldout_plot, "AF_NAO", scaled, "_Total1.png")
+plotfname = paste0(foldout_plot, "AF_NAO", scaled, "_Total_paired.png")
 tmap_save(eur, insets_tm=insets, insets_vp=vp_list, filename=plotfname, dpi=600)
 
+end_time = Sys.time()
+print(end_time-start_time)
 
 
 # ------------------------------------------------------------------------------
@@ -146,6 +150,8 @@ tmap_save(eur, insets_tm=insets, insets_vp=vp_list, filename=plotfname, dpi=600)
 # ------------------------------------------------------------------------------
 
 # all other temp groups
+start_time = Sys.time()
+
 grps = 1: length(temp_groups)
 attr = AF_NAO[,grps,2,1001] - AF_NAO[,grps,1,1001] # attr only no simu
 plot_df = as.data.frame( attr )
@@ -172,8 +178,11 @@ eur = get_map(basemap, reshp_NUTS, fill_var, breaks, palette, midpoint=NA, alpha
 #                viewport(x=0.14, y=0.65, width=0.20, height=0.20),
 #                viewport(x=0.10, y=0.45, width=0.20, height=0.20),
 #                viewport(x=0.10, y=0.28, width=0.10, height=0.10))
-plotfname = paste0(foldout_plot, "AF_NAO", scaled, "_Groups2.png")
+plotfname = paste0(foldout_plot, "AF_NAO", scaled, "_Groups_paired.png")
 tmap_save(eur, filename=plotfname, height = 8.27, width = 11.69, dpi=600)
+
+end_time = Sys.time()
+print(end_time-start_time)
 
 
 # ------------------------------------------------------------------------------
