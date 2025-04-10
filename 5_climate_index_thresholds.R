@@ -70,10 +70,18 @@ NAO = NAO |>
 # binary threshold where +ve is greater than 0 and -ve otherwise
 # ----------------
 NAO = NAO |> 
-  mutate(binary_thres = nao_index_cdas>0)
+  mutate( scaled_nao = c(scale(nao_index_cdas)) ) |> # -4.017555  3.339121
+  mutate( binary_thres = scaled_nao > 0 )
+  # mutate( binary_thres = nao_index_cdas>0 )
 NAO_thresholds =  NAO[ , c("date", "binary_thres") ]
 write.csv( NAO_thresholds, paste0(FOLD_DATA_OUT, "NAO_thresholds.csv"), row.names=FALSE )
 
 # to further filter positive, negative or neutral index. 
 # TO DO 
 # -----
+
+
+
+# ------------------------------------------------------------------------------
+# SAVE DETRENDED VERSION
+# ------------------------------------------------------------------------------
