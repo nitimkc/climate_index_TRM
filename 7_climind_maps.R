@@ -54,9 +54,10 @@ temp_groups = strsplit(CONFIG$TEMP_RANGE, ",")[[1]]
 info_region  = readRDS( paste0(foldout, "info_region.rds") )
 
 scaled = ifelse(CONFIG$CLIM_IND_SCALED==TRUE, "_zscaled", "")
-AF_NAO = readRDS( paste0(foldout, "AF_NAO", scaled, ".rds") )
-pval = readRDS( paste0(foldout, "pval_AF_NAO", scaled, ".rds") )
-sig = pval <= 0.05
+AF_NAO = readRDS( paste0(foldout, "AF_NAO", scaled, "2.rds") )
+pval = readRDS( paste0(foldout, "ttest_pval_AF_NAO", scaled, ".rds") )
+# ttest_pval = readRDS( paste0(foldout, "ttest_pval_AF_NAO", scaled, ".rds") )
+sig = ttest_pval <= 0.05
 print(colSums(sig, na.rm=TRUE))
 colnames(sig) = paste0("sig ", colnames(sig))
 
@@ -110,9 +111,9 @@ for (or in 1:length(other_regions)){
 
 # diff when not scaled, scaled and detrended
 start_time = Sys.time()
-
 g = 1
-attr = AF_NAO[,g,,1001]
+# attr = AF_NAO[,g,,1001]
+attr = AF_NAO[,1001,,g]
 plot_df = as.data.frame( cbind( attr, "diff"=attr[,2]-attr[,1] ) )
 plot_df["sig"] = ifelse(sig[,g]==T, "*", "")
 reshp_NUTS = base::merge(shp_NUTS, plot_df, by.x="NUTS_ID", by.y=0)      # add variables to plot
@@ -140,7 +141,6 @@ vp_list = list(viewport(x=0.12, y=0.80, width=0.15, height=0.15),
                viewport(x=0.10, y=0.28, width=0.10, height=0.10))
 plotfname = paste0(foldout_plot, "AF_NAO", scaled, "_Total_paired.png")
 tmap_save(eur, insets_tm=insets, insets_vp=vp_list, filename=plotfname, dpi=600)
-
 end_time = Sys.time()
 print(end_time-start_time)
 
@@ -153,7 +153,8 @@ print(end_time-start_time)
 start_time = Sys.time()
 
 grps = 1: length(temp_groups)
-attr = AF_NAO[,grps,2,1001] - AF_NAO[,grps,1,1001] # attr only no simu
+# attr = AF_NAO[,grps,2,1001] - AF_NAO[,grps,1,1001] # attr only no simu
+attr = AF_NAO[,1001,2,grps] - AF_NAO[,1001,1,grps] # attr only no simu
 plot_df = as.data.frame( attr )
 plot_df[, colnames(sig)[grps]] = ifelse(sig[,grps]==T, "*", "")
 plot_df[, colnames(sig)[grps]][is.na(plot_df[, colnames(sig)[grps]])] = ""
