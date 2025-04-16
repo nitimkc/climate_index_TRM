@@ -66,15 +66,14 @@ n_simu = 1000
 n_groups = length(temp_groups)
 n_regions = length(info_region$code)  
 col_names = c( sprintf("simu_%s", seq(1:n_simu)), list("attr") )
-
-AF   = array( NA, dim  =    c( n_regions,        1+n_simu,  n_threshold, n_groups    ),
-              dimnames = list( info_region$code, col_names, thresholds,  temp_groups ) )
-ttest_pval = wcox_pval = array( NA, dim  =    c( n_regions,        n_groups),
-                                dimnames = list( info_region$code, temp_groups) )
-
 # both .rds and parquet are missing date rownames
 # TO DO - so many dates variable seem unnecessary, review and refactor
 all_dates = seq(as.Date(CONFIG$NUTS_STARTDATE), as.Date(CONFIG$NUTS_ENDDATE), 1)
+
+AF   = array( NA, dim  =    c( n_regions,        n_threshold, 1+n_simu,   n_groups    ),
+              dimnames = list( info_region$code, thresholds,  col_names, temp_groups ) )
+ttest_pval = wcox_pval = array( NA, dim  =    c( n_regions,        n_groups),
+                                dimnames = list( info_region$code, temp_groups) )
 
 foldin = paste0( foldout, "AF_ts_simu/" ) 
 attr_files = list.files(foldin)
@@ -86,14 +85,18 @@ for (r in 1:n_regions){
   
   reg = info_region$code[r]
   print( paste0( "  Region ", r, " / ", n_regions, ": ", info_region$name[r], " (", reg, ")" ) ) 
+  
   attributions = readRDS(paste0(foldin, reg, ".rds"))
   rownames(attributions) = all_dates
   
-  AF[r,,,] = sapply(temp_groups, get_phases, attributions, 
-                    NAO_positive_dates, NAO_negative_dates, 
-                    simplify="array") # 1001x2x7
-  ttest_pval[r,] = apply( AF[r,,,], 3, function(x) get_pval(x[,1], x[,2] ) )                     # 1x7
-  wcox_pval[r,]  = apply( AF[r,,,], 3, function(x) get_pval(x[,1], x[,2], test_type="Wilcox" ) ) # 1x7 
+  attr_pos_phase = filter(attributions, all_dates %in% NAO_positive_dates)
+  attr_neg_phase = filter(attributions, all_dates %in% NAO_negative_dates)
+  
+  AF[r,1,,] = sapply(temp_groups, get_grp_mean, attr_pos_phase, simplify="array")
+  AF[r,2,,] = sapply(temp_groups, get_grp_mean, attr_neg_phase, simplify="array")
+  
+  ttest_pval[r,] = apply( AF[r,,,], 3, function(x) get_pval(x[1,], x[2,] ) )                     # 1x7
+  wcox_pval[r,]  = apply( AF[r,,,], 3, function(x) get_pval(x[1,], x[2,], test_type="Wilcox" ) ) # 1x7 
 }
 end_time = Sys.time()
 print(end_time-start_time)
@@ -106,9 +109,9 @@ print( apply(wcox_pval, 2, function(x) table(x<0.05)) )
 
 detrend_type = tail( strsplit(sub("\\.[^.]*$", "", CONFIG$NAO_THRESHOLD), "_")[[1]], 1)
 fname_note = ifelse(CONFIG$CLIM_IND_SCALED==TRUE, "", detrend_type)
-saveRDS(AF, paste0(foldout, "AF_NAO", fname_note, ".rds"))
-saveRDS(ttest_pval, paste0(foldout, "ttest_pval_AF_NAO", fname_note, ".rds"))
-saveRDS(wcox_pval, paste0(foldout, "wcox_pval_AF_NAO", fname_note, ".rds"))
+saveRDS(AF, paste0(foldout, "AF_NAO_", fname_note, ".rds"))
+saveRDS(ttest_pval, paste0(foldout, "ttest_pval_AF_NAO_", fname_note, ".rds"))
+saveRDS(wcox_pval, paste0(foldout, "wcox_pval_AF_NAO_", fname_note, ".rds"))
 
 
 # ------------------------------------------------------------------------------
