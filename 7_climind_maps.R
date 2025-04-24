@@ -53,11 +53,12 @@ temp_groups = strsplit(CONFIG$TEMP_RANGE, ",")[[1]]
 # load required outputs from previous runs
 info_region  = readRDS( paste0(foldout, "info_region.rds") )
 
-scaled = ifelse(CONFIG$CLIM_IND_SCALED==TRUE, "_zscaled", "")
-AF_NAO = readRDS( paste0(foldout, "AF_NAO", scaled, "2.rds") )
-pval = readRDS( paste0(foldout, "ttest_pval_AF_NAO", scaled, ".rds") )
+detrend_type = tail( strsplit(sub("\\.[^.]*$", "", CONFIG$NAO_THRESHOLD), "_")[[1]], 1)
+fname_note = ifelse(CONFIG$CLIM_IND_SCALED==TRUE, "", detrend_type)
+AF_NAO = readRDS( paste0(foldout, "AF_NAO_", fname_note, ".rds") )
+pval = readRDS( paste0(foldout, "ttest_pval_AF_NAO_", fname_note, ".rds") )
 # ttest_pval = readRDS( paste0(foldout, "ttest_pval_AF_NAO", scaled, ".rds") )
-sig = ttest_pval <= 0.05
+sig = pval <= 0.05
 print(colSums(sig, na.rm=TRUE))
 colnames(sig) = paste0("sig ", colnames(sig))
 
@@ -113,7 +114,7 @@ for (or in 1:length(other_regions)){
 start_time = Sys.time()
 g = 1
 # attr = AF_NAO[,g,,1001]
-attr = AF_NAO[,1001,,g]
+attr = AF_NAO[,,1001,g]
 plot_df = as.data.frame( cbind( attr, "diff"=attr[,2]-attr[,1] ) )
 plot_df["sig"] = ifelse(sig[,g]==T, "*", "")
 reshp_NUTS = base::merge(shp_NUTS, plot_df, by.x="NUTS_ID", by.y=0)      # add variables to plot
@@ -139,7 +140,7 @@ vp_list = list(viewport(x=0.12, y=0.80, width=0.15, height=0.15),
                viewport(x=0.14, y=0.65, width=0.20, height=0.20),
                viewport(x=0.10, y=0.45, width=0.20, height=0.20),
                viewport(x=0.10, y=0.28, width=0.10, height=0.10))
-plotfname = paste0(foldout_plot, "AF_NAO", scaled, "_Total_paired.png")
+plotfname = paste0(foldout_plot, "AF_NAO", fname_note, "_Total_paired2.png")
 tmap_save(eur, insets_tm=insets, insets_vp=vp_list, filename=plotfname, dpi=600)
 end_time = Sys.time()
 print(end_time-start_time)

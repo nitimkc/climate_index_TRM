@@ -42,23 +42,24 @@ foldout       = paste0( FOLD_DATA_OUT, foldout_name, "/" );
 # ------------------------------------------------------------------------------
 # READ INDEX DATA
 # ------------------------------------------------------------------------------
-clim_ind_files = list.files( FOLD_DATA_CLIM )
 
-# print( "Read NAO" )
+# can do this for each index or specify index int he config file
+clim_ind_files = list.files( FOLD_DATA_CLIM )
 index = "NAO"
+
 file_idx = which( grepl(index, clim_ind_files) )
 NAO = read_xlsx( paste0(FOLD_DATA_CLIM, clim_ind_files[file_idx]), skip=2 ) 
-n_days = ifelse(leap_year(NAO$date), 366, 365)
 NAO = NAO |> 
   mutate( date = as.Date(make_datetime(year, month, day)) ) |> 
-  mutate( time = as.numeric(date) ) #|> 
-  # mutate( deci_year = as.numeric(year) + (yday(nao$Date)-1) / n_days )
+  mutate( time = as.numeric(date) ) 
 
-# MOV Annex file contains EOF of NAO
-NAO_yearly <- NAO |>
-  group_by(year) |>
-  summarize(yearly_avg = mean(nao_index_cdas, na.rm=TRUE))
-plot(NAO_yearly$year, NAO_yearly$yearly_avg, type="l", lwd=2)
+# n_days = ifelse(leap_year(NAO$date), 366, 365)
+# NAO = NAO |> 
+#   mutate( deci_year = as.numeric(year) + (yday(nao$Date)-1) / n_days )
+# NAO_yearly <- NAO |>
+#   group_by(year) |>
+#   summarize(yearly_avg = mean(nao_index_cdas, na.rm=TRUE))
+# plot(NAO_yearly$year, NAO_yearly$yearly_avg, type="l", lwd=2) # MOV Annex file contains EOF of NAO
 
 # to further filter positive, negative or neutral index. 
 # TO DO 
@@ -74,7 +75,7 @@ na_rows = is.na(NAO$nao_index_cdas)
 n_decades <- ceiling(length(unique(NAO$year)) / 10)
 
 # detrend_type = CONFIG$DETREND # TO DO ADD to config
-detrend_type = "fourier"
+detrend_type = "quadratic"
 if (detrend_type == "none") { 
   # 14126
   # z-scale
@@ -124,7 +125,7 @@ if (detrend_type == "none") {
   NAO$binary_thres = detrended > 0
   
 }
-print(sum(NAO$binary_thres, na.rm = TRUE))
+print(table( NAO$binary_thres))
 write.csv( NAO[ , c("date", "binary_thres") ], 
            paste0(FOLD_DATA_OUT, "NAO_thresholds_", detrend_type, ".csv"), 
            row.names=FALSE )
