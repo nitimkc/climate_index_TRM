@@ -75,10 +75,11 @@ na_rows = is.na(NAO$nao_index_cdas)
 n_decades <- ceiling(length(unique(NAO$year)) / 10)
 
 # detrend_type = CONFIG$DETREND # TO DO ADD to config
-detrend_type = "quadratic"
+detrend_type = "ns"
 if (detrend_type == "none") { 
   # 14126
   # z-scale
+  detrend_type = "zscaled"
   scaled = c(scale(NAO$nao_index_cdas)) 
   NAO$binary_thres = scaled > 0
   

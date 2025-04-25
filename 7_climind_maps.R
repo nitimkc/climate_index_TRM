@@ -53,11 +53,12 @@ temp_groups = strsplit(CONFIG$TEMP_RANGE, ",")[[1]]
 # load required outputs from previous runs
 info_region  = readRDS( paste0(foldout, "info_region.rds") )
 
-detrend_type = tail( strsplit(sub("\\.[^.]*$", "", CONFIG$NAO_THRESHOLD), "_")[[1]], 1)
-fname_note = ifelse(CONFIG$CLIM_IND_SCALED==TRUE, "", detrend_type)
+fname_note = tail( strsplit(sub("\\.[^.]*$", "", CONFIG$NAO_THRESHOLD), "_")[[1]], 1)
+test_type = "wcox"
 AF_NAO = readRDS( paste0(foldout, "AF_NAO_", fname_note, ".rds") )
-pval = readRDS( paste0(foldout, "ttest_pval_AF_NAO_", fname_note, ".rds") )
-# ttest_pval = readRDS( paste0(foldout, "ttest_pval_AF_NAO", scaled, ".rds") )
+# AF = readRDS( paste0(foldout, "AF_NAO_", fname_note, "_parallelized.rds") )
+pval = readRDS( paste0(foldout, test_type, "_pval_AF_NAO_", fname_note, ".rds") )
+
 sig = pval <= 0.05
 print(colSums(sig, na.rm=TRUE))
 colnames(sig) = paste0("sig ", colnames(sig))
@@ -110,11 +111,9 @@ for (or in 1:length(other_regions)){
 # MAP ATTRIBUTABLE FRACTION FOR EACH REGION - TOTAL TEMP. GROUP ONLY
 # ------------------------------------------------------------------------------
 
-# diff when not scaled, scaled and detrended
-start_time = Sys.time()
-g = 1
-# attr = AF_NAO[,g,,1001]
-attr = AF_NAO[,,1001,g]
+start_time = Sys.time() # ~1 mins
+g = 1                   # "Total" temp group
+attr = AF_NAO[,,1001,g] # actual value
 plot_df = as.data.frame( cbind( attr, "diff"=attr[,2]-attr[,1] ) )
 plot_df["sig"] = ifelse(sig[,g]==T, "*", "")
 reshp_NUTS = base::merge(shp_NUTS, plot_df, by.x="NUTS_ID", by.y=0)      # add variables to plot
@@ -140,7 +139,7 @@ vp_list = list(viewport(x=0.12, y=0.80, width=0.15, height=0.15),
                viewport(x=0.14, y=0.65, width=0.20, height=0.20),
                viewport(x=0.10, y=0.45, width=0.20, height=0.20),
                viewport(x=0.10, y=0.28, width=0.10, height=0.10))
-plotfname = paste0(foldout_plot, "AF_NAO", fname_note, "_Total_paired2.png")
+plotfname = paste0(foldout_plot, "AF_NAO_", fname_note, "_Total_paired.png")
 tmap_save(eur, insets_tm=insets, insets_vp=vp_list, filename=plotfname, dpi=600)
 end_time = Sys.time()
 print(end_time-start_time)
@@ -151,11 +150,11 @@ print(end_time-start_time)
 # ------------------------------------------------------------------------------
 
 # all other temp groups
-start_time = Sys.time()
+start_time = Sys.time() # ~2 mins
 
-grps = 1: length(temp_groups)
-# attr = AF_NAO[,grps,2,1001] - AF_NAO[,grps,1,1001] # attr only no simu
-attr = AF_NAO[,1001,2,grps] - AF_NAO[,1001,1,grps] # attr only no simu
+grps = 1: length(temp_groups)                      # all temp groups
+# attr = AF_NAO[,grps,2,1001] - AF_NAO[,grps,1,1001] # for zscaled dim are diff
+attr = AF_NAO[,2,1001,grps] - AF_NAO[,1,1001,grps] # attr only no simu
 plot_df = as.data.frame( attr )
 plot_df[, colnames(sig)[grps]] = ifelse(sig[,grps]==T, "*", "")
 plot_df[, colnames(sig)[grps]][is.na(plot_df[, colnames(sig)[grps]])] = ""
@@ -180,7 +179,7 @@ eur = get_map(basemap, reshp_NUTS, fill_var, breaks, palette, midpoint=NA, alpha
 #                viewport(x=0.14, y=0.65, width=0.20, height=0.20),
 #                viewport(x=0.10, y=0.45, width=0.20, height=0.20),
 #                viewport(x=0.10, y=0.28, width=0.10, height=0.10))
-plotfname = paste0(foldout_plot, "AF_NAO", scaled, "_Groups_paired.png")
+plotfname = paste0(foldout_plot, "AF_NAO_", fname_note, "_Groups_paired.png")
 tmap_save(eur, filename=plotfname, height = 8.27, width = 11.69, dpi=600)
 
 end_time = Sys.time()
