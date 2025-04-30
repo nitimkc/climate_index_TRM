@@ -59,7 +59,7 @@ AF_NAO = readRDS( paste0(foldout, "AF_NAO_", fname_note, ".rds") )
 # AF = readRDS( paste0(foldout, "AF_NAO_", fname_note, "_parallelized.rds") )
 pval = readRDS( paste0(foldout, test_type, "_pval_AF_NAO_", fname_note, ".rds") )
 
-sig = pval <= 0.05
+sig = pval <= 0.01
 print(colSums(sig, na.rm=TRUE))
 colnames(sig) = paste0("sig ", colnames(sig))
 
@@ -124,7 +124,7 @@ palette = get_palette(plot_code, breaks) # "brewer.rd_bu" # brewer.blues
 # eur_title = "Attributable Fraction between Positive and Negative phases of NAO"
 
 eur = get_map(basemap, reshp_NUTS, fill_var, breaks, palette, midpoint=NA, alpha=0.7, 
-              legend=TRUE, legend_title="", legend_size=0.4, frame=TRUE, sig="sig") +
+              legend=TRUE, legend_title="", legend_size=0.4, frame=TRUE) + # sig="sig"
   tm_shape( shp_country, is.main=FALSE ) +
   tm_borders( lwd = 0.5 )
 insets = list()

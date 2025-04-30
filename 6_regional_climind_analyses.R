@@ -62,22 +62,31 @@ thresholds = switch(n_threshold==2, c('pos', 'neg'), NA) # TO DO add what other 
 all_dates = as.character( seq(as.Date(CONFIG$NUTS_STARTDATE), as.Date(CONFIG$NUTS_ENDDATE), 1) )
 NAO = NAO[NAO$date <= CONFIG$NUTS_ENDDATE, ]
 
-NAO_positive_dates = as.character( NAO[NAO$binary_thres==TRUE, ]$date )
-NAO_negative_dates = as.character( NAO[NAO$binary_thres!=TRUE, ]$date )
 # TO DO add additional thresholds if any
+NAO_positive_dates = NAO[NAO$binary_thres==TRUE, ]$date
+NAO_pos_djf = as.character( get_period_dates(NAO_positive_dates) )
+NAO_pos_ja  = as.character( get_period_dates(NAO_positive_dates, period='summer') )
+NAO_positive_dates = as.character( NAO[NAO$binary_thres==TRUE, ]$date )
+
+NAO_negative_dates = NAO[NAO$binary_thres!=TRUE, ]$date
+NAO_neg_djf = as.character( get_period_dates(NAO_negative_dates) )
+NAO_neg_ja  = as.character( get_period_dates(NAO_negative_dates, period='summer') )
+NAO_negative_dates = as.character( NAO[NAO$binary_thres!=TRUE, ]$date )
 
 
 # ------------------------------------------------------------------------------
 # GET ATTRIBUTABLE FRACTION DATA FOR EACH NAO PHASE
 # ------------------------------------------------------------------------------
 
+periods = c("all", "winter", "summer")
+n_periods = length(periods)
 n_simu = CONFIG$N_SIMU
 n_groups = length(temp_groups)
 n_regions = length(info_region$code)  
 col_names = c( sprintf("simu_%s", seq(1:n_simu)), list("attr") )
 
-AF   = array( NA, dim  =    c( n_regions,        n_threshold, 1+n_simu,   n_groups   ),
-              dimnames = list( info_region$code, thresholds,  col_names, temp_groups ) )
+AF   = array( NA, dim  =    c( n_regions,        n_threshold, 1+n_simu,   n_groups,   n_periods ),
+              dimnames = list( info_region$code, thresholds,  col_names, temp_groups, periods ) )
 # ttest_pval = wcox_pval = array( NA, dim  =    c( n_regions,        n_groups   ),
 #                                 dimnames = list( info_region$code, temp_groups) )
 
@@ -87,7 +96,7 @@ attr_files = list.files(foldin)
 # test = read_parquet(paste0(parqt_folder, parqt_files[200])) 
 fname_note = tail( strsplit(sub("\\.[^.]*$", "", CONFIG$NAO_THRESHOLD), "_")[[1]], 1)
 
-start_time = Sys.time() # 10 min parallel/ 24 mins without
+start_time = Sys.time() # 14 min parallel/ 24 mins without
 if (CONFIG$PARALLEL==TRUE){
   # parallelize
   # ------------
@@ -98,17 +107,28 @@ if (CONFIG$PARALLEL==TRUE){
     attributions = readRDS(paste0(foldin, reg, ".rds"))
     rownames(attributions) = all_dates
     
-    attr_phase = filter(attributions, all_dates %in% as.Date( sgn ) )
+    attr_phase = filter(attributions, all_dates %in% sgn )
     sapply(temp_groups, get_group_mean, attr_phase, simplify="array")
   }
   nbc <- 4
-  attr_pos <- mclapply(1:n_regions, mean_attr, NAO_positive_dates, mc.cores=nbc);
-  attr_neg <- mclapply(1:n_regions, mean_attr, NAO_negative_dates, mc.cores=nbc);
+  # attr_pos <- mclapply(1:n_regions, mean_attr, NAO_positive_dates, mc.cores=nbc);
+  attr_pos_djf <- mclapply(1:n_regions, mean_attr, NAO_pos_djf, mc.cores=nbc);
+  attr_neg_djf <- mclapply(1:n_regions, mean_attr, NAO_neg_djf, mc.cores=nbc);
+  
+  # attr_neg <- mclapply(1:n_regions, mean_attr, NAO_negative_dates, mc.cores=nbc);
+  attr_pos_djf <- mclapply(1:n_regions, mean_attr, NAO_pos_ja, mc.cores=nbc);
+  attr_neg_djf <- mclapply(1:n_regions, mean_attr, NAO_neg_ja, mc.cores=nbc);
+  
   for (r in 1:n_regions) {
-    AF[r,1,,] <- attr_pos[[r]]
-    AF[r,2,,] <- attr_neg[[r]]
+    AF[r,1,,,1] <- attr_pos[[r]]
+    AF[r,1,,,2] <- attr_pos_djf[[r]]
+    AF[r,1,,,3] <- attr_pos_ja[[r]]
+    
+    AF[r,2,,,1] <- attr_neg[[r]]
+    AF[r,2,,,2] <- attr_neg_djf[[r]]
+    AF[r,2,,,3] <- attr_neg_ja[[r]]
   }
-  saveRDS(AF, paste0(foldout, "AF_NAO_", fname_note, "_parallelized.rds"))
+  saveRDS(AF, paste0(foldout, "AF_NAO_periods", fname_note, "_parallelized.rds"))
   
 } else {
   # w/out parallelize
@@ -121,15 +141,25 @@ if (CONFIG$PARALLEL==TRUE){
     rownames(attributions) = all_dates
     
     attr_pos_phase = filter(attributions, all_dates %in% NAO_positive_dates)
-    attr_neg_phase = filter(attributions, all_dates %in% NAO_negative_dates)
+    attr_pos_djf = filter(attributions, all_dates %in% NAO_pos_djf)
+    attr_pos_ja  = filter(attributions, all_dates %in% NAO_pos_ja)
     
-    AF[r,1,,] = sapply(temp_groups, get_group_mean, attr_pos_phase, simplify="array")
-    AF[r,2,,] = sapply(temp_groups, get_group_mean, attr_neg_phase, simplify="array")
+    attr_neg_phase = filter(attributions, all_dates %in% NAO_negative_dates)
+    attr_neg_djf = filter(attributions, all_dates %in% NAO_neg_djf)
+    attr_neg_ja  = filter(attributions, all_dates %in% NAO_neg_ja)
+    
+    AF[r,1,,,1] = sapply(temp_groups, get_group_mean, attr_pos_phase, simplify="array")
+    AF[r,1,,,2] = sapply(temp_groups, get_group_mean, attr_pos_djf, simplify="array")
+    AF[r,1,,,3] = sapply(temp_groups, get_group_mean, attr_pos_ja, simplify="array")
+    
+    AF[r,2,,]   = sapply(temp_groups, get_group_mean, attr_neg_phase, simplify="array")
+    AF[r,2,,,2] = sapply(temp_groups, get_group_mean, attr_neg_djf, simplify="array")
+    AF[r,2,,,3] = sapply(temp_groups, get_group_mean, attr_neg_ja, simplify="array")
     
     # ttest_pval[r,] = apply( AF[r,,,], 3, function(x) get_pval(x[1,], x[2,] ) )                     # 1x7
     # wcox_pval[r,]  = apply( AF[r,,,], 3, function(x) get_pval(x[1,], x[2,], test_type="Wilcox" ) ) # 1x7
   }
-  saveRDS(AF, paste0(foldout, "AF_NAO_", fname_note, ".rds"))
+  saveRDS(AF, paste0(foldout, "AF_NAO_periods", fname_note, ".rds"))
 }
 end_time = Sys.time()
 print(end_time-start_time)
@@ -139,18 +169,18 @@ print(end_time-start_time)
 # COMPUTE STATISTICAL DIFFERENCE OF MEAN BETWEEN EACH NAO PHASE
 # ------------------------------------------------------------------------------
 
-ttest_pval = apply( AF, c(1,4), function(x) get_pval(x[1,], x[2,]) )
-wcox_pval  = apply( AF, c(1,4), function(x) get_pval(x[1,], x[2,], test_type="Wilcox") )
+ttest_pval = apply( AF, c(1,4,3), function(x) get_pval(x[1,], x[2,]) )
+wcox_pval  = apply( AF, c(1,4,3), function(x) get_pval(x[1,], x[2,], test_type="Wilcox") )
 # TO DO add dimnames
 
-saveRDS(ttest_pval, paste0(foldout, "ttest_pval_AF_NAO_", fname_note, ".rds"))
-saveRDS(wcox_pval, paste0(foldout, "wcox_pval_AF_NAO_", fname_note, ".rds"))
+saveRDS(ttest_pval, paste0(foldout, "ttest_pval_AF_NAO_periods", fname_note, ".rds"))
+saveRDS(wcox_pval, paste0(foldout, "wcox_pval_AF_NAO_periods", fname_note, ".rds"))
 
-print( apply(ttest_pval, 2, FUN=function(x) {length(x[x<=0.05])/length(x)}) )
-print( apply(ttest_pval, 2, function(x) table(x<0.05)) )
+print( apply(ttest_pval, c(2,3), FUN=function(x) {length(x[x<=0.05])/length(x)}) )
+print( apply(ttest_pval, c(2,3), function(x) table(x<0.05)) )
 
-print( apply(wcox_pval, 2, FUN=function(x) {length(x[x<=0.05])/length(x)}) )
-print( apply(wcox_pval, 2, function(x) table(x<0.05)) )
+print( apply(wcox_pval, c(2,3), FUN=function(x) {length(x[x<=0.05])/length(x)}) )
+print( apply(wcox_pval, c(2,3), function(x) table(x<0.05)) )
 
 
 # # ------------------------------------------------------------------------------
