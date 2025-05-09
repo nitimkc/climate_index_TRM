@@ -73,6 +73,12 @@ temp_knots = strtoi(strsplit(CONFIG$TEMP_KNOTS, ",")[[1]]) / 100
 # others
 ATTR_PERIOD = strsplit(CONFIG$ATTRIBUTION_PERIOD, ",")[[1]]
 temp_groups = strsplit(CONFIG$TEMP_RANGE, ",")[[1]]
+n_groups  = length(temp_groups)
+n_regions = length(info_region$code)
+n_countries = length( unique(info_region$country_code) )
+n_EU_regions = length( unique(info_region$EU_regions) )
+n_simu    = CONFIG$N_SIMU ; if( n_simu < 1000 ){ print( paste0( "  WARNING: Only ", n_simu, " simulations used for AN estimation" ) ); }
+col_names = c( sprintf("simu_%s", seq(1:n_simu)), list("attr") )
 conf_int = c(0.025,0.975); # two-tailed 95% Confidence Interval # TO DO move to config
 
 
@@ -84,13 +90,7 @@ if( "Whole Period" %in% ATTR_PERIOD ){
   
   periods = c("Whole Period")
   print( paste0("Analysis for - ", periods) )
-
-  n_regions = length(info_region$code)
   n_periods = length(periods);
-  n_groups  = length(temp_groups)
-  n_simu    = CONFIG$N_SIMU ; if( n_simu < 1000 ){ print( paste0( "  WARNING: Only ", n_simu, " simulations used for AN estimation" ) ); }
-  
-  col_names = c( sprintf("simu_%s", seq(1:n_simu)), list("attr") )
   attr_num = attr_frac = array( NA, dim   =   c( n_regions,        n_groups,    1 + n_simu),
                                 dimnames = list( info_region$code, temp_groups, col_names ) )
   # AN_CI = AF_CI = array( 0, dim   =    c( n_regions,      n_periods,    n_groups, 2                 ),
@@ -162,6 +162,18 @@ if( "Whole Period" %in% ATTR_PERIOD ){
   saveRDS( attr_frac,     paste0(foldout, "attr_frac.rds") )
   saveRDS( AN_adj_factor, paste0(foldout, "AN_adj_factor.rds") )
   
+  # summaries and confidence intervals by regions and countries
+  # -----------------------------------------------------------
+  attr_frac_all = apply(attr_frac, 2, get_geo_groups, info_region, simplify=FALSE)
+  AF_confint_all = sapply(attr_frac_all, get_confidence_interval, simplify=FALSE)
+  AF_confint_all = simplify2array(AF_confint_all)
+  saveRDS(AF_confint_all, paste0(foldout, "AF_confint_wholeperiod", ".rds"))
+  
+  attr_num_all = apply(attr_num, 2, get_geo_groups, info_region, simplify=FALSE)
+  AN_confint_all = sapply(attr_num_all, get_confidence_interval, simplify=FALSE)
+  AN_confint_all = simplify2array(AF_confint_all)
+  saveRDS(AN_confint_all, paste0(foldout, "AN_confint_wholeperiod", ".rds"))
+  
 } else { 
   print("Adjusted attributions for whole period not required") 
   }
@@ -176,11 +188,7 @@ if('NUTS' %in% ATTR_PERIOD){
   # periods = seq( as.Date(CONFIG$NUTS_STARTDATE), as.Date(CONFIG$NUTS_ENDDATE)-MAX_LAG, 1 )
   periods = seq( as.Date(CONFIG$NUTS_STARTDATE), as.Date(CONFIG$NUTS_ENDDATE), 1 )
   periods = format(periods, "%Y-%m-%d")
-
   n_periods = length(periods)
-  n_groups  = length(temp_groups)
-  n_simu    = CONFIG$N_SIMU ; if( n_simu < 1000 ){ print( paste0( "  WARNING: Only ", n_simu, " simulations used for AN estimation" ) ); }
-  col_names = c( sprintf("simu_%s", seq(1:n_simu)), list("attr") )
   
   pred_thresholds_MOV = sapply( pred_temp_MOV, function(x) quantile( x$temp, conf_int, na.rm = TRUE ) )
   
@@ -232,4 +240,3 @@ if('NUTS' %in% ATTR_PERIOD){
 } else {
   print("Attributions for Prediction Period not required")
 }
-

@@ -43,6 +43,8 @@ info_region  = readRDS( paste0(foldout, "info_region.rds") )
 
 # temperature groups
 temp_groups = strsplit(CONFIG$TEMP_RANGE, ",")[[1]]
+conf_int = c(0.025,0.975); # two-tailed 95% Confidence Interval # TO DO move to config
+
 
 # ------------------------------------------------------------------------------
 # READ INDEX DATA AND PREPROCESS
@@ -50,7 +52,8 @@ temp_groups = strsplit(CONFIG$TEMP_RANGE, ",")[[1]]
 
 NAO = read_csv( paste0(FOLD_DATA_OUT, CONFIG$NAO_THRESHOLD) )
 n_threshold = n_distinct(NAO$binary_thres, na.rm = TRUE)
-thresholds = switch(n_threshold==2, c('pos', 'neg'), NA) # TO DO add what other threshold might be
+phases = c('pos', 'neg')
+thresholds = switch(n_threshold==2, phases, NA) # TO DO add what other threshold might be
 
 # threshold_cols = grepl( "thres", colnames(NAO) )
 # TO DO -- revise, refactor, automate
@@ -66,29 +69,30 @@ NAO = NAO[NAO$date <= CONFIG$NUTS_ENDDATE, ]
 NAO_positive_dates = NAO[NAO$binary_thres==TRUE, ]$date
 NAO_pos_djf = as.character( get_period_dates(NAO_positive_dates) )
 NAO_pos_ja  = as.character( get_period_dates(NAO_positive_dates, period='summer') )
-NAO_positive_dates = as.character( NAO[NAO$binary_thres==TRUE, ]$date )
 
 NAO_negative_dates = NAO[NAO$binary_thres!=TRUE, ]$date
 NAO_neg_djf = as.character( get_period_dates(NAO_negative_dates) )
 NAO_neg_ja  = as.character( get_period_dates(NAO_negative_dates, period='summer') )
+
+NAO_positive_dates = as.character( NAO[NAO$binary_thres==TRUE, ]$date )
 NAO_negative_dates = as.character( NAO[NAO$binary_thres!=TRUE, ]$date )
 
 
 # ------------------------------------------------------------------------------
-# GET ATTRIBUTABLE FRACTION DATA FOR EACH NAO PHASE
+# GET ATTRIBUTABLE FRACTION DATA FOR VARIOUS TIME PERIODS
 # ------------------------------------------------------------------------------
 
-periods = c("all", "winter", "summer")
-n_periods = length(periods)
+seasons = c("winter", "summer","all")
+n_seasons = length(seasons)
 n_simu = CONFIG$N_SIMU
 n_groups = length(temp_groups)
 n_regions = length(info_region$code)  
 col_names = c( sprintf("simu_%s", seq(1:n_simu)), list("attr") )
 
-AF   = array( NA, dim  =    c( n_regions,        n_threshold, 1+n_simu,   n_groups,   n_periods ),
-              dimnames = list( info_region$code, thresholds,  col_names, temp_groups, periods ) )
-# ttest_pval = wcox_pval = array( NA, dim  =    c( n_regions,        n_groups   ),
-#                                 dimnames = list( info_region$code, temp_groups) )
+AF       = array( NA, dim  =    c( n_regions,        n_threshold, 1+n_simu,     n_groups, n_seasons ),
+                  dimnames = list( info_region$code, thresholds,  col_names, temp_groups, seasons ) )
+AF_all   = array( NA, dim  =    c( n_regions,         1+n_simu,   n_groups ),
+                  dimnames = list( info_region$code, col_names, temp_groups ) )
 
 foldin = paste0( foldout, "AF_ts_simu/" ) 
 attr_files = list.files(foldin)
@@ -96,97 +100,183 @@ attr_files = list.files(foldin)
 # test = read_parquet(paste0(parqt_folder, parqt_files[200])) 
 fname_note = tail( strsplit(sub("\\.[^.]*$", "", CONFIG$NAO_THRESHOLD), "_")[[1]], 1)
 
-start_time = Sys.time() # 14 min parallel/ 24 mins without
+# SOMETHIS IS NOT RIGHT WITH AF CALCULATION 
+# CHECK WHY THERE ARE NA
+# IT SHOULD ONLY BE IF THERE ARE NO DAYS SELECTED FOR THAT TEMPERATURE GROUP
+# WHY WOULD TOTAL GROUP HAVE NA WHEN ONE OF THE HEAT OR COLD GROUPS HAVE NUMBERS
+
+start = Sys.time() # 14 min parallel/ 24 mins without
 if (CONFIG$PARALLEL==TRUE){
   # parallelize
   # ------------
+  nbc <- 8
   mean_attr <- function(r, sgn) {
     reg = info_region$code[r]
-    print( paste0( "  Region ", r, " / ", n_regions, ": ", info_region$name[r], " (", reg, ")" ) )
+    # print( paste0( "  Region ", r, " / ", n_regions, ": ", info_region$name[r], " (", reg, ")" ) )
     
     attributions = readRDS(paste0(foldin, reg, ".rds"))
     rownames(attributions) = all_dates
-    
     attr_phase = filter(attributions, all_dates %in% sgn )
     sapply(temp_groups, get_group_mean, attr_phase, simplify="array")
   }
-  nbc <- 4
-  # attr_pos <- mclapply(1:n_regions, mean_attr, NAO_positive_dates, mc.cores=nbc);
+  
+  # seasons of each phases
+  start_time = Sys.time()
   attr_pos_djf <- mclapply(1:n_regions, mean_attr, NAO_pos_djf, mc.cores=nbc);
   attr_neg_djf <- mclapply(1:n_regions, mean_attr, NAO_neg_djf, mc.cores=nbc);
+  print("Calculation for winter complete")
+  end_time = Sys.time()
+  print(end_time-start_time)
   
-  # attr_neg <- mclapply(1:n_regions, mean_attr, NAO_negative_dates, mc.cores=nbc);
-  attr_pos_djf <- mclapply(1:n_regions, mean_attr, NAO_pos_ja, mc.cores=nbc);
-  attr_neg_djf <- mclapply(1:n_regions, mean_attr, NAO_neg_ja, mc.cores=nbc);
+  start_time = Sys.time()
+  attr_pos_ja  <- mclapply(1:n_regions, mean_attr, NAO_pos_ja, mc.cores=nbc);
+  attr_neg_ja  <- mclapply(1:n_regions, mean_attr, NAO_neg_ja, mc.cores=nbc);
+  print("Calculation for summer complete")
+  end_time = Sys.time()
+  print(end_time-start_time)
+  
+  # each phases
+  start_time = Sys.time()
+  attr_pos     <- mclapply(1:n_regions, mean_attr, NAO_positive_dates, mc.cores=nbc);
+  attr_neg     <- mclapply(1:n_regions, mean_attr, NAO_negative_dates, mc.cores=nbc);
+  print("Calculation for each phase complete")
+  end_time = Sys.time()
+  print(end_time-start_time)
+  
+  # whole period (both phases)
+  start_time = Sys.time()
+  attr_all <- mclapply(1:n_regions, mean_attr, all_dates, mc.cores=nbc);
+  print("Calculation for entire period complete")
+  end_time = Sys.time()
+  print(end_time-start_time) 
   
   for (r in 1:n_regions) {
-    AF[r,1,,,1] <- attr_pos[[r]]
-    AF[r,1,,,2] <- attr_pos_djf[[r]]
-    AF[r,1,,,3] <- attr_pos_ja[[r]]
+    # whole period
+    AF_all[r,,] <- attr_all[[r]]
     
-    AF[r,2,,,1] <- attr_neg[[r]]
-    AF[r,2,,,2] <- attr_neg_djf[[r]]
-    AF[r,2,,,3] <- attr_neg_ja[[r]]
+    # positive
+    AF[r,1,,,1] <- attr_pos_djf[[r]]
+    AF[r,1,,,2] <- attr_pos_ja[[r]]
+    AF[r,1,,,3] <- attr_pos[[r]]
+    
+    # negative
+    AF[r,2,,,1] <- attr_neg_djf[[r]]
+    AF[r,2,,,2] <- attr_neg_ja[[r]]
+    AF[r,2,,,3] <- attr_neg[[r]]
   }
-  saveRDS(AF, paste0(foldout, "AF_NAO_periods", fname_note, "_parallelized.rds"))
+  saveRDS(AF_all, paste0(foldout, "AF_NAO_", fname_note, "_wholeperiod", "_parallelized.rds"))
+  saveRDS(AF,     paste0(foldout, "AF_NAO_", fname_note, "_seasons", "_parallelized.rds"))
   
 } else {
   # w/out parallelize
   # -----------------
-  for (r in 1:n_regions){
+  for (r in 1:n_regions) {
     reg = info_region$code[r]
     print( paste0( "  Region ", r, " / ", n_regions, ": ", info_region$name[r], " (", reg, ")" ) )
-
+    
     attributions = readRDS(paste0(foldin, reg, ".rds"))
     rownames(attributions) = all_dates
     
-    attr_pos_phase = filter(attributions, all_dates %in% NAO_positive_dates)
-    attr_pos_djf = filter(attributions, all_dates %in% NAO_pos_djf)
-    attr_pos_ja  = filter(attributions, all_dates %in% NAO_pos_ja)
+    # seasons of each phase
+    attr_pos_djf   = filter(attributions, all_dates %in% NAO_pos_djf)
+    attr_neg_djf   = filter(attributions, all_dates %in% NAO_neg_djf)
+    attr_pos_ja    = filter(attributions, all_dates %in% NAO_pos_ja)
+    attr_neg_ja    = filter(attributions, all_dates %in% NAO_neg_ja)
     
-    attr_neg_phase = filter(attributions, all_dates %in% NAO_negative_dates)
-    attr_neg_djf = filter(attributions, all_dates %in% NAO_neg_djf)
-    attr_neg_ja  = filter(attributions, all_dates %in% NAO_neg_ja)
+    # each phase
+    attr_pos = filter(attributions, all_dates %in% NAO_positive_dates)
+    attr_neg = filter(attributions, all_dates %in% NAO_negative_dates)
     
-    AF[r,1,,,1] = sapply(temp_groups, get_group_mean, attr_pos_phase, simplify="array")
-    AF[r,1,,,2] = sapply(temp_groups, get_group_mean, attr_pos_djf, simplify="array")
-    AF[r,1,,,3] = sapply(temp_groups, get_group_mean, attr_pos_ja, simplify="array")
+    # whole period (both phases) 
+    start_time = Sys.time()
+    AF_all[r,,] = sapply(temp_groups, get_group_mean, attributions, simplify="array")
+    print("Calculation for entire period complete")
+    end_time = Sys.time()
+    print(end_time-start_time)
     
-    AF[r,2,,]   = sapply(temp_groups, get_group_mean, attr_neg_phase, simplify="array")
-    AF[r,2,,,2] = sapply(temp_groups, get_group_mean, attr_neg_djf, simplify="array")
-    AF[r,2,,,3] = sapply(temp_groups, get_group_mean, attr_neg_ja, simplify="array")
+    start_time = Sys.time()
+    # positive
+    AF[r,1,,,1] = sapply(temp_groups, get_group_mean, attr_pos_djf, simplify="array")
+    AF[r,1,,,2] = sapply(temp_groups, get_group_mean, attr_pos_ja, simplify="array")
+    AF[r,1,,,3] = sapply(temp_groups, get_group_mean, attr_pos, simplify="array")
+    print("Calculation for positive phases complete")
+    end_time = Sys.time()
+    print(end_time-start_time)
     
-    # ttest_pval[r,] = apply( AF[r,,,], 3, function(x) get_pval(x[1,], x[2,] ) )                     # 1x7
-    # wcox_pval[r,]  = apply( AF[r,,,], 3, function(x) get_pval(x[1,], x[2,], test_type="Wilcox" ) ) # 1x7
+    start_time = Sys.time()
+    # negative
+    AF[r,2,,,1] = sapply(temp_groups, get_group_mean, attr_neg_djf, simplify="array")
+    AF[r,2,,,2] = sapply(temp_groups, get_group_mean, attr_neg_ja, simplify="array")
+    AF[r,2,,,3] = sapply(temp_groups, get_group_mean, attr_neg, simplify="array")
+    print("Calculation for negative phases complete")
+    end_time = Sys.time()
+    print(end_time-start_time)
   }
-  saveRDS(AF, paste0(foldout, "AF_NAO_periods", fname_note, ".rds"))
+  saveRDS(AF_all, paste0(foldout, "AF_NAO_", fname_note, "_wholeperiod", ".rds"))
+  saveRDS(AF,     paste0(foldout, "AF_NAO_", fname_note, "_seasons", ".rds"))
 }
-end_time = Sys.time()
-print(end_time-start_time)
+end = Sys.time()
+print(end-start)
+
+# summaries and confidence intervals by regions and countries
+# -----------------------------------------------------------
+# for whole prediction period
+AF_all = apply(AF_all, 3, get_geo_groups, info_region, simplify=FALSE)
+AF_confint_all = sapply(AF_all, get_confidence_interval, simplify=FALSE)
+AF_confint_all = simplify2array(AF_confint_all)
+saveRDS(AF_confint_all, paste0(foldout, "AF_confint_predperiod", ".rds"))
+
+# for NAO phases and seasons within the prediction period
+phase_list = list()
+for (phs in (1:n_threshold)){
+  
+  season_list = list()
+  for (ssn in (1:n_seasons)) {
+    season = seasons[ssn]
+    attr = apply(AF[,phs,,,ssn], 3, get_geo_groups, info_region, simplify=FALSE)
+    attr_confint = sapply(attr, get_confidence_interval, simplify=FALSE)
+    attr_confint = simplify2array(attr_confint)
+    
+    season_list = append(season_list, list(attr_confint))
+  }
+  AF_confint_seasons = do.call(abind::abind, append(season_list, list(rev.along = 0)))
+  dimnames(AF_confint_seasons)[[length(dimnames(AF_confint_seasons))]] = seasons
+  
+  phase_list = append(phase_list, list(AF_confint_seasons))
+}
+AF_confint_seasons_phases = do.call(abind::abind, append(phase_list, list(rev.along = 0)))
+dimnames(AF_confint_seasons_phases)[[length(dimnames(AF_confint_seasons_phases))]] = phases
+saveRDS(AF_confint_seasons_phases, paste0(foldout, "AF_NAO_", fname_note, "_confint_phases_seasons.rds"))
 
 
-# ------------------------------------------------------------------------------
-# COMPUTE STATISTICAL DIFFERENCE OF MEAN BETWEEN EACH NAO PHASE
-# ------------------------------------------------------------------------------
-
-ttest_pval = apply( AF, c(1,4,3), function(x) get_pval(x[1,], x[2,]) )
-wcox_pval  = apply( AF, c(1,4,3), function(x) get_pval(x[1,], x[2,], test_type="Wilcox") )
+# statistical significance test
+# -----------------------------
+ttest_pval = apply( AF, c(1,4,5), function(x) get_pval(x[1,], x[2,]) )
+wcox_pval  = apply( AF, c(1,4,5), function(x) get_pval(x[1,], x[2,], test_type="Wilcox") )
 # TO DO add dimnames
 
-saveRDS(ttest_pval, paste0(foldout, "ttest_pval_AF_NAO_periods", fname_note, ".rds"))
-saveRDS(wcox_pval, paste0(foldout, "wcox_pval_AF_NAO_periods", fname_note, ".rds"))
+saveRDS(ttest_pval, paste0(foldout, "ttest_pval_AF_NAO_", fname_note, "_seasons.rds"))
+saveRDS(wcox_pval, paste0(foldout, "wcox_pval_AF_NAO_", fname_note, "_seasons.rds"))
 
 print( apply(ttest_pval, c(2,3), FUN=function(x) {length(x[x<=0.05])/length(x)}) )
-print( apply(ttest_pval, c(2,3), function(x) table(x<0.05)) )
+print( apply(ttest_pval, c(2,3), function(x) sum(x<0.05)) )
 
 print( apply(wcox_pval, c(2,3), FUN=function(x) {length(x[x<=0.05])/length(x)}) )
-print( apply(wcox_pval, c(2,3), function(x) table(x<0.05)) )
+print( apply(wcox_pval, c(2,3), function(x) sum(x<0.05)) )
 
 
-# # ------------------------------------------------------------------------------
-# # GROUP BY COUNTRY AND LARGER REGIONS
-# # ------------------------------------------------------------------------------
-# 
+# ------------------------------------------------------------------------------
+# POPULATION WEIGHTED AF/AN
+# ------------------------------------------------------------------------------
+
+# grp = "Total"
+# data = AF_all[,,grp]
+# dim(data)
+# test = plot_df %>%
+#   group_by(CNTR_CODE) %>%
+#   summarise( Total = sum(popu * Total) / sum(popu) ) 
+
+
 # detrend_type = tail( strsplit(sub("\\.[^.]*$", "", CONFIG$NAO_THRESHOLD), "_")[[1]], 1)
 # fname_note   = ifelse(CONFIG$CLIM_IND_SCALED==TRUE, "", detrend_type)
 # AF_NAO       = readRDS( paste0(foldout, "AF_NAO", fname_note, ".rds") )

@@ -47,23 +47,29 @@ foldout = paste0( FOLD_DATA_OUT, foldout_name)
 foldout_plot = paste0( FOLD_DATA_OUT, foldout_name, "plots/")
 if( !file_test( "-d", foldout ) ){ dir.create( file.path(foldout)); }
 
-# temperature groups
-temp_groups = strsplit(CONFIG$TEMP_RANGE, ",")[[1]]
-
 # load required outputs from previous runs
-info_region  = readRDS( paste0(foldout, "info_region.rds") )
-
 fname_note = tail( strsplit(sub("\\.[^.]*$", "", CONFIG$NAO_THRESHOLD), "_")[[1]], 1)
-test_type = "wcox"
-AF_NAO = readRDS( paste0(foldout, "AF_NAO_", fname_note, ".rds") )
-# AF = readRDS( paste0(foldout, "AF_NAO_", fname_note, "_parallelized.rds") )
-pval = readRDS( paste0(foldout, test_type, "_pval_AF_NAO_", fname_note, ".rds") )
+test_type = "ttest"
+
+# AF_NAO = readRDS( paste0(foldout, "AF_NAO_", fname_note, ".rds") )
+# AF_NAO = readRDS( paste0(foldout, "AF_NAO_", fname_note, "_periods_parallelized.rds") )
+# pval = readRDS( paste0(foldout, test_type, "_pval_AF_NAO_", fname_note, "_periods.rds") )
+
+info_region  = readRDS( paste0(foldout, "info_region.rds") )
+AF_NAO = readRDS( paste0(foldout, "AF_NAO_", fname_note, "_confint_phases_seasons.rds") )
+pval = readRDS( paste0(foldout, test_type, "_pval_AF_NAO_", fname_note, "_seasons.rds"))
 
 sig = pval <= 0.01
 print(colSums(sig, na.rm=TRUE))
 colnames(sig) = paste0("sig ", colnames(sig))
 
 # others
+temp_groups = strsplit(CONFIG$TEMP_RANGE, ",")[[1]]
+n_groups  = length(temp_groups)
+n_regions = length(info_region$code)
+n_countries = length( unique(info_region$country_code) )
+n_EU_regions = length( unique(info_region$EU_regions) )
+
 # TO DO - ?? MOVE TO CONFIG
 # plot_codes = c("MMTV", "TANN","TWIN","TSUM","TP01","TP99","TIQR",
 #                "RR99","RR95","RR90","RR75","RR50","RR25","RR10","RR05","RR01",
@@ -107,106 +113,139 @@ for (or in 1:length(other_regions)){
   # print(other_regions[[or]]$basemap)
 }
 
+
 # ------------------------------------------------------------------------------
-# MAP ATTRIBUTABLE FRACTION FOR EACH REGION - TOTAL TEMP. GROUP ONLY
+# MAP ATTRIBUTABLE FRACTION
 # ------------------------------------------------------------------------------
 
-start_time = Sys.time() # ~1 mins
-g = 1                   # "Total" temp group
-attr = AF_NAO[,,1001,g] # actual value
-plot_df = as.data.frame( cbind( attr, "diff"=attr[,2]-attr[,1] ) )
-plot_df["sig"] = ifelse(sig[,g]==T, "*", "")
-reshp_NUTS = base::merge(shp_NUTS, plot_df, by.x="NUTS_ID", by.y=0)      # add variables to plot
+# plot vars
+val = 1 # attr
+geo_idx = n_countries+n_EU_regions
+season = "summer"      # season
+ssn_idx = ifelse(season=="winter", 1, ifelse(season=="summer", 2, 3) )
 
-fill_var = "diff"
-breaks  = get_breaks(plot_df[,'diff'], plot_code="AFTH")
-palette = get_palette(plot_code, breaks) # "brewer.rd_bu" # brewer.blues 
-# eur_title = "Attributable Fraction between Positive and Negative phases of NAO"
 
-eur = get_map(basemap, reshp_NUTS, fill_var, breaks, palette, midpoint=NA, alpha=0.7, 
-              legend=TRUE, legend_title="", legend_size=0.4, frame=TRUE) + # sig="sig"
-  tm_shape( shp_country, is.main=FALSE ) +
-  tm_borders( lwd = 0.5 )
-insets = list()
-for (or in 1:length(other_regions)){
-  print(other_regions[[or]]$title)
-  reshp_NUTS_or = reshp_NUTS[(reshp_NUTS$NUTS_ID %in% other_regions[[or]]$islands), ]
-  insets[[or]] = get_map(other_regions[[or]]$basemap, reshp_NUTS_or, fill_var, breaks, 
-                         palette, midpoint=NA, alpha=0.7, legend=FALSE, frame=TRUE, 
-                         title=other_regions[[or]]$title, sig="sig" )
+# Total temperature group only
+# ----------------------------
+start_time = Sys.time() # ~1 mins 10.59984 secs
+grp = 1                # Total temp group
+attr = AF_NAO[-seq_len(geo_idx),val,grp,ssn_idx,]
+attr_sig = sig[,grp,ssn_idx]
+
+plot_df = plot_df = as.data.frame( cbind( attr, "diff"=attr[,2]-attr[,1] ) )  # neg means positive phase has higher AF # how to handle NA
+plot_df["sig"] = ifelse(attr_sig==T, "*", "")
+
+for (phs in 0:1) { 
+  
+  if (phs==0){            
+    fill_var = "diff"       # difference of phase or specific phase
+    phase_name = paste0("_", fill_var)
+    breaks  = cbreaks(range(plot_df[, fill_var], na.rm=TRUE), breaks_pretty(10))$breaks
+    palette = "brewer.rd_bu" #-RdBu" # get_palette(breaks, plot_code="AFTH") # brewer.blues
+    sig_var = NA #"sig"
+    # eur_title = "Attributable Fraction between Positive and Negative phases of NAO"
+    
+    reshp_NUTS = base::merge(shp_NUTS, plot_df, by.x="NUTS_ID", by.y=0)      # add variables to plot
+    eur = get_map(basemap, reshp_NUTS, fill_var, breaks, palette, midpoint=NA, alpha=0.7,
+                  legend=TRUE, legend_title="", legend_size=0.4, frame=TRUE, sig=sig_var)
+    insets = list()
+    for (or in 1:length(other_regions)){
+      print(other_regions[[or]]$title)
+      reshp_NUTS_or = reshp_NUTS[(reshp_NUTS$NUTS_ID %in% other_regions[[or]]$islands), ]
+      insets[[or]] = get_map(other_regions[[or]]$basemap, reshp_NUTS_or, fill_var, breaks, 
+                             palette, midpoint=NA, alpha=0.7, legend=FALSE, frame=TRUE, 
+                             title=other_regions[[or]]$title, sig=sig_var )
+    }
+    vp_list = list(viewport(x=0.12, y=0.80, width=0.15, height=0.15),
+                   viewport(x=0.14, y=0.65, width=0.20, height=0.20),
+                   viewport(x=0.10, y=0.45, width=0.20, height=0.20),
+                   viewport(x=0.10, y=0.28, width=0.10, height=0.10))
+    
+    plotfname = paste0(foldout_plot, "AF_NAO_", fname_note, "_Total_", season, phase_name, ".png")
+    tmap_save(eur, insets_tm=insets, insets_vp=vp_list, filename=plotfname, dpi=600)
+    
+  } else {
+    fill_var = c("pos", "neg")    # each phase
+    phase_name = "_phases"
+    breaks  = cbreaks(range(plot_df[, fill_var], na.rm=TRUE), breaks_pretty(10))$breaks
+    palette = "brewer.reds" # get_palette(breaks, plot_code="AFTH") # brewer.blues
+    sig_var = NA
+    # eur_title = "Attributable Fraction between Positive and Negative phases of NAO"
+    
+    reshp_NUTS = base::merge(shp_NUTS, plot_df, by.x="NUTS_ID", by.y=0)      # add variables to plot
+    eur = get_map(basemap, reshp_NUTS, fill_var, breaks, palette, midpoint=NA, alpha=0.7,
+                  legend=TRUE, legend_title="", legend_size=0.4, frame=TRUE, sig=sig_var)
+    plotfname = paste0(foldout_plot, "AF_NAO_", fname_note, "_Total_", season, phase_name, ".png")
+    tmap_save(eur, filename=plotfname, dpi=600)
+  }
 }
-vp_list = list(viewport(x=0.12, y=0.80, width=0.15, height=0.15),
-               viewport(x=0.14, y=0.65, width=0.20, height=0.20),
-               viewport(x=0.10, y=0.45, width=0.20, height=0.20),
-               viewport(x=0.10, y=0.28, width=0.10, height=0.10))
-plotfname = paste0(foldout_plot, "AF_NAO_", fname_note, "_Total_paired.png")
-tmap_save(eur, insets_tm=insets, insets_vp=vp_list, filename=plotfname, dpi=600)
 end_time = Sys.time()
 print(end_time-start_time)
 
 
-# ------------------------------------------------------------------------------
-# MAP ATTRIBUTABLE FRACTION FOR EACH REGION - SIX TEMP. GROUPS
-# ------------------------------------------------------------------------------
-
-# all other temp groups
-start_time = Sys.time() # ~2 mins
-
-grps = 1: length(temp_groups)                      # all temp groups
-# attr = AF_NAO[,grps,2,1001] - AF_NAO[,grps,1,1001] # for zscaled dim are diff
-attr = AF_NAO[,2,1001,grps] - AF_NAO[,1,1001,grps] # attr only no simu
-plot_df = as.data.frame( attr )
-plot_df[, colnames(sig)[grps]] = ifelse(sig[,grps]==T, "*", "")
-plot_df[, colnames(sig)[grps]][is.na(plot_df[, colnames(sig)[grps]])] = ""
-reshp_NUTS = base::merge(shp_NUTS, plot_df, by.x="NUTS_ID", by.y=0)      # add variables to plot
+# All temperature groups
+# ----------------------
 
 fill_var = c("Total Heat", "Moderate Heat", "Extreme Heat", "Total Cold", "Moderate Cold", "Extreme Cold", "Total")
-sig_var = paste0("sig ", fill_var)
-breaks  = get_breaks(attr, plot_code="AFTH")
-palette = get_palette(plot_code, breaks) # "brewer.rd_bu" # brewer.blues 
-# eur_title = "Attributable Fraction between Positive and Negative phases of NAO"
+grps  = 1: length(temp_groups)       # all temp groups
+attr = AF_NAO[-seq_len(geo_idx),val,grps,ssn_idx,]
 
-eur = get_map(basemap, reshp_NUTS, fill_var, breaks, palette, midpoint=NA, alpha=0.7, 
-              legend=TRUE, legend_title="", legend_size=0.4, frame=TRUE, sig=sig_var)
-# insets = list()
-# for (or in 1:length(other_regions)){
-#   print(other_regions[[or]]$title)
-#   reshp_NUTS_or = reshp_NUTS[(reshp_NUTS$NUTS_ID %in% other_regions[[or]]$islands), ]
-#   insets[[or]] = get_map(other_regions[[or]]$basemap, reshp_NUTS_or, fill_var, breaks, palette, midpoint=NA,
-#                          alpha=0.7, legend=FALSE, frame=TRUE, title=other_regions[[or]]$title )
-# }
-# vp_list = list(viewport(x=0.12, y=0.80, width=0.15, height=0.15),
-#                viewport(x=0.14, y=0.65, width=0.20, height=0.20),
-#                viewport(x=0.10, y=0.45, width=0.20, height=0.20),
-#                viewport(x=0.10, y=0.28, width=0.10, height=0.10))
-plotfname = paste0(foldout_plot, "AF_NAO_", fname_note, "_Groups_paired.png")
-tmap_save(eur, filename=plotfname, height = 8.27, width = 11.69, dpi=600)
+for (phs in 0:2) { 
+  start_time = Sys.time()   # ~2 mins
+  
+  if (phs==0){            # difference of phase or specific phase
+    phase_name = "_diff" 
+    plot_df = as.data.frame( attr[,,2] - attr[,,1] ) # neg means positive phase has higher AF # how to handle NA
+    breaks  = cbreaks(range(plot_df, na.rm=TRUE), breaks_pretty(10))$breaks
+    palette = "-RdBu"
+    plot_df[, colnames(sig)[grps]] = ifelse(sig[,grps,season]==T, "*", "")
+    plot_df[, colnames(sig)[grps]][is.na(plot_df[, colnames(sig)[grps]])] = ""
+    sig_var = paste0("sig ", fill_var)
+    
+  } else {
+    phase_name = ifelse(phs==1, "_pos", "_neg")
+    plot_df = as.data.frame( attr[,,phs] )
+    breaks  = cbreaks(range(plot_df, na.rm=TRUE), breaks_pretty(10))$breaks
+    palette = "brewer.reds" # get_palette(breaks, plot_code="AFTH") # brewer.blues
+    sig_var = NA
+  }
 
-end_time = Sys.time()
-print(end_time-start_time)
+  print(colMeans(plot_df[,grps], na.rm=T))
+  reshp_NUTS = base::merge(shp_NUTS, plot_df, by.x="NUTS_ID", by.y=0)      # add variables to plot
+  # eur_title = "Attributable Fraction between Positive and Negative phases of NAO"
+
+  eur = get_map(basemap, reshp_NUTS, fill_var, breaks, palette=palette, midpoint=NA, alpha=0.7,
+                legend=TRUE, legend_title="", legend_size=0.4, frame=TRUE, sig=sig_var)
+  plotfname = paste0(foldout_plot, "AF_NAO_", fname_note, "_Groups_", season, phase_name, ".png")
+  print(plotfname)
+  tmap_save(eur, filename=plotfname, height = 8.27, width = 11.69, dpi=600)
+
+  end_time = Sys.time()
+  print(end_time-start_time)
+}
 
 
 # ------------------------------------------------------------------------------
 # POPULATION WEIGHTED AF
 # ------------------------------------------------------------------------------
 
-popn = read.table( paste0(CONFIG$ROOT, "indata/", "eurostat_table_popu_allsex_allage.csv"), 
-                   header = TRUE, sep = "," )
-popn = popn[popn$year==2024, c(1,3)]
-
-grps = 1: length(temp_groups)
-n_simu = 1000
-attr = AF_NAO[,grps,2,1:n_simu] - AF_NAO[,grps,1,1:n_simu] # simu only
-
-plot_df = as.data.frame(attr[,1,1])
-colnames(plot_df) = c("Total")
-plot_df = base::merge(popn, plot_df, by.x="location", by.y="row.names")
-plot_df["CNTR_CODE"] = substr(plot_df$location, 1, 2)
-
-test = plot_df %>%
-  group_by(CNTR_CODE) %>%
-  summarise( Total = sum(popu * Total) / sum(popu) ) 
-
-plot_df[, colnames(sig)[grps]] = ifelse(sig[,grps]==T, "*", "")
-plot_df[, colnames(sig)[grps]][is.na(plot_df[, colnames(sig)[grps]])] = ""
-plot_df["CNTR_CODE"] = substr(rownames(plot_df), 1, 2)
+# popn = read.table( paste0(CONFIG$ROOT, "indata/", "eurostat_table_popu_allsex_allage.csv"), 
+#                    header = TRUE, sep = "," )
+# popn = popn[popn$year==2024, c(1,3)]
+# 
+# grps = 1: length(temp_groups)
+# n_simu = 1000
+# attr = AF_NAO[,grps,2,1:n_simu] - AF_NAO[,grps,1,1:n_simu] # simu only
+# 
+# plot_df = as.data.frame(attr[,1,1])
+# colnames(plot_df) = c("Total")
+# plot_df = base::merge(popn, plot_df, by.x="location", by.y="row.names")
+# plot_df["CNTR_CODE"] = substr(plot_df$location, 1, 2)
+# 
+# test = plot_df %>%
+#   group_by(CNTR_CODE) %>%
+#   summarise( Total = sum(popu * Total) / sum(popu) ) 
+# 
+# plot_df[, colnames(sig)[grps]] = ifelse(sig[,grps]==T, "*", "")
+# plot_df[, colnames(sig)[grps]][is.na(plot_df[, colnames(sig)[grps]])] = ""
+# plot_df["CNTR_CODE"] = substr(rownames(plot_df), 1, 2)

@@ -95,6 +95,10 @@ mort <- rbindlist( lapply(mort_files, fread) )
 print( paste0("Read country map") )
 country_map = read.table( paste0(FOLD_DATA_MAIN, CONFIG$COUNTRY_MAP), header = TRUE, sep = "," )
 
+print( paste0("Read population data") )
+popn = read.table( paste0(FOLD_DATA_MAIN, CONFIG$POPULATION), header = TRUE, sep = "," )
+popn = popn[popn$year==CONFIG$POPULATION_YEAR, c(1,3)]
+
 end_time = Sys.time()
 print(end_time-start_time)
 
@@ -106,7 +110,7 @@ print(end_time-start_time)
 start_time = Sys.time() # 8.645938 mins, 25.48462 secs
 preprocessed <- data_processing(metadata, temp_hist, mort, foldout, foldout_name,
                                 att=list(sex=sSEX, age=sAGE, cause=sCAU), 
-                                country_map, vFILE_MORT, CONFIG$LAG_MAX, dates_NUTS)
+                                country_map, vFILE_MORT, CONFIG$LAG_MAX, dates_NUTS, popn)
 end_time = Sys.time()
 print(end_time-start_time)
 
