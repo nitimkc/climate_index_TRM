@@ -73,9 +73,9 @@ NAO = NAO |>
 N = length(NAO$nao_index_cdas)
 na_rows = is.na(NAO$nao_index_cdas)  
 n_decades <- ceiling(length(unique(NAO$year)) / 10)
+detrend_type = sub(pattern = "NAO_thresholds_(.*)\\..*$", replacement = "\\1", CONFIG$NAO_THRESHOLD)
+print(detrend_type)
 
-# detrend_type = CONFIG$DETREND # TO DO ADD to config
-detrend_type = "ns"
 if (detrend_type == "none") { 
   # 14126
   # z-scale

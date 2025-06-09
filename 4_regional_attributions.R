@@ -13,7 +13,9 @@
 # REQUIRED LIBRARIES, FUNCTIONS AND CONFIG
 # ------------------------------------------------------------------------------
 if (!require("pacman")) install.packages("pacman")
-pacman::p_load(config, arrow)
+pacman::p_load(config, data.table, plyr)#, arrow)
+# library(data.table)
+# library("plyr")
 
 source("exposure_lag_response.R")         # dlnm wrappers
 source("attributable_morality.R")         # attr wrappers
@@ -36,8 +38,8 @@ sCAU = CONFIG$CAUSE
 iSEN = CONFIG$SENSITIVITY # Change when ready for sensitivity analyses
 
 # attribute specific folder
-foldout_name  = paste0(sSEX, "_", sAGE, "_", sCAU, "_iSEN.", iSEN)
-foldout       = paste0( FOLD_DATA_OUT, foldout_name, "/" );
+foldout_name  = paste0(sSEX, "_", sAGE, "_", sCAU, "_iSEN.", iSEN, "/")
+foldout       = paste0( FOLD_DATA_OUT, foldout_name);
 
 # load required outputs from previous runs
 info_region     = readRDS( paste0(foldout, "info_region.rds") )
@@ -72,6 +74,7 @@ temp_knots = strtoi(strsplit(CONFIG$TEMP_KNOTS, ",")[[1]]) / 100
 
 # others
 ATTR_PERIOD = strsplit(CONFIG$ATTRIBUTION_PERIOD, ",")[[1]]
+print(ATTR_PERIOD)
 temp_groups = strsplit(CONFIG$TEMP_RANGE, ",")[[1]]
 n_groups  = length(temp_groups)
 n_regions = length(info_region$code)
@@ -83,7 +86,7 @@ conf_int = c(0.025,0.975); # two-tailed 95% Confidence Interval # TO DO move to 
 
 
 # ------------------------------------------------------------------------------
-print("Attributions for prediction period adjusted by mortality")
+print("Attributions for prediction period adjusted by mortality -")
 # ------------------------------------------------------------------------------
 
 if( "Whole Period" %in% ATTR_PERIOD ){
@@ -165,22 +168,26 @@ if( "Whole Period" %in% ATTR_PERIOD ){
   # summaries and confidence intervals by regions and countries
   # -----------------------------------------------------------
   attr_frac_all = apply(attr_frac, 2, get_geo_groups, info_region, simplify=FALSE)
+  # attr_frac_all = apply(attr_frac, 3, get_geo_groups, info_region, simplify=FALSE)
   AF_confint_all = sapply(attr_frac_all, get_confidence_interval, simplify=FALSE)
   AF_confint_all = simplify2array(AF_confint_all)
   saveRDS(AF_confint_all, paste0(foldout, "AF_confint_wholeperiod", ".rds"))
   
   attr_num_all = apply(attr_num, 2, get_geo_groups, info_region, simplify=FALSE)
+  # attr_num_all = apply(attr_num, 3, get_geo_groups, info_region, simplify=FALSE)
   AN_confint_all = sapply(attr_num_all, get_confidence_interval, simplify=FALSE)
   AN_confint_all = simplify2array(AF_confint_all)
   saveRDS(AN_confint_all, paste0(foldout, "AN_confint_wholeperiod", ".rds"))
   
 } else { 
-  print("Adjusted attributions for whole period not required") 
+  print("not required") 
   }
 
+# test2 = apply(attr_num, 3, get_geo_groups, info_region, simplify=FALSE)
+# test2AF = apply(attr_frac, 3, get_geo_groups, info_region, simplify=FALSE)
 
 # ------------------------------------------------------------------------------
-print("AF for prediction period for Modes of Variability (MOV) analysis")
+print("AF for prediction period for Modes of Variability (MOV) analysis -")
 # ------------------------------------------------------------------------------
 
 if('NUTS' %in% ATTR_PERIOD){
@@ -195,8 +202,8 @@ if('NUTS' %in% ATTR_PERIOD){
   # attr_frac = array( NA, dim=c(n_regions,n_simu+1,n_groups), dimnames=list(info_region$code,col_names,temp_groups) )
   # attr_frac too large object to save in memory
   
-  # foldout_attr = paste0( foldout, "AF_ts_simu" )
-  foldout_attr = paste0( foldout, "AF_ts_simu_pqt" ) # TO DO - MOVE FOLDER NAME TO CONFIG
+  foldout_attr = paste0( foldout, "AF_ts_simu" )
+  # foldout_attr = paste0( foldout, "AF_ts_simu_pqt" ) # TO DO - PQT READ SPEED TEST LATER
   if( !file_test( "-d", foldout_attr ) ){ dir.create( file.path(foldout_attr)); }
   
   start = Sys.time() # 15.16536 mins remote
@@ -221,6 +228,7 @@ if('NUTS' %in% ATTR_PERIOD){
                                                min_PMMT, max_PMMT,
                                                col_names) # no mortality adjustment for prediction period
     AF_ts_simu = AF_ts_simu * 100
+    # AF_ts_simu = AF_ts_simu 
     rownames(AF_ts_simu) = periods
     
     # Attributions for each temperature range group
@@ -229,14 +237,17 @@ if('NUTS' %in% ATTR_PERIOD){
     for (g in 1:n_groups) { filter_cols[idx_groups[[g]] , g] = TRUE }
     AF_ts_simu = do.call(dplyr::bind_cols, list(AF_ts_simu, filter_cols)) 
     
-    pqt_filepath = tempfile(tmpdir=foldout_attr, fileext=".gzip.parquet")
-    write_parquet(AF_ts_simu, sink=pqt_filepath, compression="gzip")           # faster than snappy
-    # saveRDS( AF_ts_simu, paste0(foldout_attr, info_region$code[r], ".rds") ) # TO DO current saved versions do not have rownames add if re-run
+    # reg_foldout = paste0(foldout_attr,"/", info_region$code[r])
+    # if( !file_test( "-d", reg_foldout ) ){ dir.create( file.path(reg_foldout)); }
+    # pqt_filepath = tempfile(tmpdir=reg_foldout, fileext=".gzip.parquet")
+    # write_parquet(AF_ts_simu, sink=pqt_filepath, compression="gzip")           # faster than snappy
+    
+    saveRDS( AF_ts_simu, paste0(foldout_attr, "/", info_region$code[r], ".rds") )
   }
   rm(filter_cols, AF_ts_simu)
   end = Sys.time()
   print(end-start)
 
 } else {
-  print("Attributions for Prediction Period not required")
+  print("not required")
 }

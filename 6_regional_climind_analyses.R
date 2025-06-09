@@ -13,7 +13,8 @@
 if (!require("pacman")) install.packages("pacman")
 suppressMessages( pacman::p_load(config, profvis, tidyverse, parallel) )
 
-source("climate_index_analyses.R")                 # analyses of climate index in use
+source("climate_index_analyses.R")        # analyses of climate index in use
+source("attributable_morality.R")         # attr wrappers
 
 CONFIG <- config::get()
 print(CONFIG$NAO_THRESHOLD)
@@ -55,8 +56,8 @@ n_threshold = n_distinct(NAO$binary_thres, na.rm = TRUE)
 phases = c('pos', 'neg')
 thresholds = switch(n_threshold==2, phases, NA) # TO DO add what other threshold might be
 
-# threshold_cols = grepl( "thres", colnames(NAO) )
 # TO DO -- revise, refactor, automate
+# threshold_cols = grepl( "thres", colnames(NAO) )
 # thres_cols_idx = which(grepl( 'thres', colnames(NAO) ))
 # dates = NAO$date
 
@@ -88,6 +89,7 @@ n_simu = CONFIG$N_SIMU
 n_groups = length(temp_groups)
 n_regions = length(info_region$code)  
 col_names = c( sprintf("simu_%s", seq(1:n_simu)), list("attr") )
+fname_note = tail( strsplit(sub("\\.[^.]*$", "", CONFIG$NAO_THRESHOLD), "_")[[1]], 1)
 
 AF       = array( NA, dim  =    c( n_regions,        n_threshold, 1+n_simu,     n_groups, n_seasons ),
                   dimnames = list( info_region$code, thresholds,  col_names, temp_groups, seasons ) )
@@ -98,14 +100,9 @@ foldin = paste0( foldout, "AF_ts_simu/" )
 attr_files = list.files(foldin)
 # "AF_ts_simu_pqt/" # parquet files do not have region name
 # test = read_parquet(paste0(parqt_folder, parqt_files[200])) 
-fname_note = tail( strsplit(sub("\\.[^.]*$", "", CONFIG$NAO_THRESHOLD), "_")[[1]], 1)
-
-# SOMETHIS IS NOT RIGHT WITH AF CALCULATION 
-# CHECK WHY THERE ARE NA
-# IT SHOULD ONLY BE IF THERE ARE NO DAYS SELECTED FOR THAT TEMPERATURE GROUP
-# WHY WOULD TOTAL GROUP HAVE NA WHEN ONE OF THE HEAT OR COLD GROUPS HAVE NUMBERS
 
 start = Sys.time() # 14 min parallel/ 24 mins without
+
 if (CONFIG$PARALLEL==TRUE){
   # parallelize
   # ------------
@@ -170,6 +167,7 @@ if (CONFIG$PARALLEL==TRUE){
 } else {
   # w/out parallelize
   # -----------------
+  # test r = 1
   for (r in 1:n_regions) {
     reg = info_region$code[r]
     print( paste0( "  Region ", r, " / ", n_regions, ": ", info_region$name[r], " (", reg, ")" ) )
@@ -220,11 +218,16 @@ print(end-start)
 
 # summaries and confidence intervals by regions and countries
 # -----------------------------------------------------------
+
+# AF_all = readRDS(paste0(foldout, "AF_NAO_", fname_note, "_wholeperiod_parallelized", ".rds"))
+# AF = readRDS(paste0(foldout, "AF_NAO_", fname_note, "_seasons_parallelized", ".rds"))
+  
 # for whole prediction period
 AF_all = apply(AF_all, 3, get_geo_groups, info_region, simplify=FALSE)
 AF_confint_all = sapply(AF_all, get_confidence_interval, simplify=FALSE)
 AF_confint_all = simplify2array(AF_confint_all)
 saveRDS(AF_confint_all, paste0(foldout, "AF_confint_predperiod", ".rds"))
+print("confidence intervals at group-level complete")
 
 # for NAO phases and seasons within the prediction period
 phase_list = list()
@@ -247,13 +250,16 @@ for (phs in (1:n_threshold)){
 AF_confint_seasons_phases = do.call(abind::abind, append(phase_list, list(rev.along = 0)))
 dimnames(AF_confint_seasons_phases)[[length(dimnames(AF_confint_seasons_phases))]] = phases
 saveRDS(AF_confint_seasons_phases, paste0(foldout, "AF_NAO_", fname_note, "_confint_phases_seasons.rds"))
+print("confidence intervals for phases and seasons complete")
 
+# AF2_confint_seasons_phases = readRDS(paste0(foldout, "AF_NAO_", fname_note, "_confint_phases_seasons.rds"))
 
 # statistical significance test
 # -----------------------------
 ttest_pval = apply( AF, c(1,4,5), function(x) get_pval(x[1,], x[2,]) )
 wcox_pval  = apply( AF, c(1,4,5), function(x) get_pval(x[1,], x[2,], test_type="Wilcox") )
 # TO DO add dimnames
+print("statistical tests complete")
 
 saveRDS(ttest_pval, paste0(foldout, "ttest_pval_AF_NAO_", fname_note, "_seasons.rds"))
 saveRDS(wcox_pval, paste0(foldout, "wcox_pval_AF_NAO_", fname_note, "_seasons.rds"))

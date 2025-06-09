@@ -16,7 +16,6 @@ if (!require("pacman")) install.packages("pacman")
 pacman::p_load(config, dlnm, mixmeta, stargazer)
 
 source("exposure_lag_response.R")         # dlnm wrappers
-source("FWALD.R");                        # Wald Test of the meta-predictors
 
 CONFIG <- config::get()
 
