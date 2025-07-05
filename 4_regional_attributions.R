@@ -75,13 +75,20 @@ temp_knots = strtoi(strsplit(CONFIG$TEMP_KNOTS, ",")[[1]]) / 100
 # others
 ATTR_PERIOD = strsplit(CONFIG$ATTRIBUTION_PERIOD, ",")[[1]]
 print(ATTR_PERIOD)
+
 temp_groups = strsplit(CONFIG$TEMP_RANGE, ",")[[1]]
 n_groups  = length(temp_groups)
+
 n_regions = length(info_region$code)
-n_countries = length( unique(info_region$country_code) )
-n_EU_regions = length( unique(info_region$EU_regions) )
+eea_subregions = unique(info_region$eea_subregion)
+countries = unique(info_region$country_code)
+dimnames_agg = list(unlist(list(c("Europe"), eea_subregions, countries)))
+ndims_agg = c(1, length(eea_subregions), length(countries)) 
+nregions_agg = sum(ndims_agg)
+
 n_simu    = CONFIG$N_SIMU ; if( n_simu < 1000 ){ print( paste0( "  WARNING: Only ", n_simu, " simulations used for AN estimation" ) ); }
 col_names = c( sprintf("simu_%s", seq(1:n_simu)), list("attr") )
+
 conf_int = c(0.025,0.975); # two-tailed 95% Confidence Interval # TO DO move to config
 
 
@@ -96,8 +103,6 @@ if( "Whole Period" %in% ATTR_PERIOD ){
   n_periods = length(periods);
   attr_num = attr_frac = array( NA, dim   =   c( n_regions,        n_groups,    1 + n_simu),
                                 dimnames = list( info_region$code, temp_groups, col_names ) )
-  # AN_CI = AF_CI = array( 0, dim   =    c( n_regions,      n_periods,    n_groups, 2                 ),
-  #                        dimnames = list( info_region$code, periods, temp_groups, c("low", "upper") ) )
   
   # Adjustment of missing values (see Function "attrdl.R" and Gasparrini and Leone 2014)
   AN_adj_factor = array( 0, dim=n_regions, dimnames=list(info_region$code) )
@@ -164,90 +169,54 @@ if( "Whole Period" %in% ATTR_PERIOD ){
   saveRDS( attr_num,      paste0(foldout, "attr_num.rds") )
   saveRDS( attr_frac,     paste0(foldout, "attr_frac.rds") )
   saveRDS( AN_adj_factor, paste0(foldout, "AN_adj_factor.rds") )
-  
+
   # summaries and confidence intervals by regions and countries
+  # -----------------------------------------------------------  
+  attr_num_agg = attr_frac_agg = array( NA, dim  =    c( nregions_agg,      n_groups,    1 + n_simu),
+                                        dimnames = list( dimnames_agg[[1]], temp_groups, col_names ) )
+  AN_adj_agg = array( 0, dim=nregions_agg, dimnames=dimnames_agg )
+  
+  print("Attributions for prediction period for each aggregated region")
+  for (r_agg in dimnames_agg[[1]]) {
+    print(paste0("  ", r_agg))
+    if (r_agg == "Europe") {
+      attr_num_agg[r_agg,,] = apply(attr_num, c(2,3), sum)
+      AN_adj_agg[r_agg] = sum(AN_adj_factor)
+      attr_frac_agg[r_agg,,] = (attr_num_agg[r_agg,,] /  AN_adj_agg[r_agg])*100
+    } else {
+      
+      if (r_agg %in% eea_subregions) {
+        agg_idx = (info_region$eea_subregion==r_agg)
+      } else if (r_agg %in% countries) {
+        agg_idx = (info_region$country_code==r_agg)
+      } else { print(paste0("Aggregated Region name not in data: ", r_agg))}
+      
+      if (sum(agg_idx) > 1) {
+        attr_num_agg[r_agg,,] = apply(attr_num[agg_idx,,], c(2,3), sum)
+      } else if (sum(agg_idx) == 1) {
+        attr_num_agg[r_agg,,] = attr_num[agg_idx,,]
+      } else { print("No region selected for aggregation.")} 
+      AN_adj_agg[r_agg] = sum(AN_adj_factor[agg_idx])
+      attr_frac_agg[r_agg,,] = (attr_num_agg[r_agg,,] /  AN_adj_agg[r_agg])*100
+      
+    }
+  }
+
+  # combine all and add confidence interval of estimates
   # -----------------------------------------------------------
-  attr_frac_all = apply(attr_frac, 2, get_geo_groups, info_region, simplify=FALSE)
-  # attr_frac_all = apply(attr_frac, 3, get_geo_groups, info_region, simplify=FALSE)
-  AF_confint_all = sapply(attr_frac_all, get_confidence_interval, simplify=FALSE)
-  AF_confint_all = simplify2array(AF_confint_all)
-  saveRDS(AF_confint_all, paste0(foldout, "AF_confint_wholeperiod", ".rds"))
+  attr_num_all = abind::abind(attr_num_agg, attr_num, along=1)
+  AN_adj_factor_all = abind::abind(AN_adj_agg, AN_adj_factor, along=1)
+  attr_frac_all = abind::abind(attr_frac_agg, attr_frac, along=1)
+
+  saveRDS(attr_num_all, paste0(foldout, "AN_simu_wholeperiod", ".rds"))
+  saveRDS(AN_adj_factor_all, paste0(foldout, "AN_adj_factor_wholeperiod", ".rds"))
+  saveRDS(attr_frac_all, paste0(foldout, "AF_simu_wholeperiod", ".rds"))
   
-  attr_num_all = apply(attr_num, 2, get_geo_groups, info_region, simplify=FALSE)
-  # attr_num_all = apply(attr_num, 3, get_geo_groups, info_region, simplify=FALSE)
-  AN_confint_all = sapply(attr_num_all, get_confidence_interval, simplify=FALSE)
-  AN_confint_all = simplify2array(AF_confint_all)
-  saveRDS(AN_confint_all, paste0(foldout, "AN_confint_wholeperiod", ".rds"))
-  
+  AN = get_geo_groups(attr_num_all, 0, conf_int, n_groups, save=TRUE, filename="AN_confint_wholeperiod")
+  AF = get_geo_groups(attr_frac_all, 2, conf_int, n_groups, save=TRUE, filename="AF_confint_wholeperiod")
+  print("All attributions combined.")
+
 } else { 
   print("not required") 
-  }
-
-# test2 = apply(attr_num, 3, get_geo_groups, info_region, simplify=FALSE)
-# test2AF = apply(attr_frac, 3, get_geo_groups, info_region, simplify=FALSE)
-
-# ------------------------------------------------------------------------------
-print("AF for prediction period for Modes of Variability (MOV) analysis -")
-# ------------------------------------------------------------------------------
-
-if('NUTS' %in% ATTR_PERIOD){
-  
-  # periods = seq( as.Date(CONFIG$NUTS_STARTDATE), as.Date(CONFIG$NUTS_ENDDATE)-MAX_LAG, 1 )
-  periods = seq( as.Date(CONFIG$NUTS_STARTDATE), as.Date(CONFIG$NUTS_ENDDATE), 1 )
-  periods = format(periods, "%Y-%m-%d")
-  n_periods = length(periods)
-  
-  pred_thresholds_MOV = sapply( pred_temp_MOV, function(x) quantile( x$temp, conf_int, na.rm = TRUE ) )
-  
-  # attr_frac = array( NA, dim=c(n_regions,n_simu+1,n_groups), dimnames=list(info_region$code,col_names,temp_groups) )
-  # attr_frac too large object to save in memory
-  
-  foldout_attr = paste0( foldout, "AF_ts_simu" )
-  # foldout_attr = paste0( foldout, "AF_ts_simu_pqt" ) # TO DO - PQT READ SPEED TEST LATER
-  if( !file_test( "-d", foldout_attr ) ){ dir.create( file.path(foldout_attr)); }
-  
-  start = Sys.time() # 15.16536 mins remote
-  for( r in 1:n_regions ){
-    print( paste0( "  Region ", r, " / ", n_regions, ": ", info_region$name[r], " (", info_region$code[r], ")" ) )
-    
-    data_calib = calib_mort_temp[[r]]
-    data_pred  = pred_temp_MOV[[r]]
-    
-    # One-Basis of temperature centered at MMT
-    ob_temp_centered = MMT_centered_onebasis(data_calib$temp, 
-                                             data_pred$temp,
-                                             MMT_postmeta[[r]],
-                                             temp_knots, SPLINE_TYPE, spline_degree)
-    i = 1 # for CUM. ERF
-    # ADD COMMENT
-    AF_ts_simu = simulated_attributable_values(ob_temp_centered,
-                                               blup_postmeta[[i]][[r]]$blup,
-                                               blup_postmeta[[i]][[r]]$vcov,
-                                               CONFIG$SEED, n_simu,
-                                               CONFIG$LOCAL_MIN_MMT,
-                                               min_PMMT, max_PMMT,
-                                               col_names) # no mortality adjustment for prediction period
-    AF_ts_simu = AF_ts_simu * 100
-    # AF_ts_simu = AF_ts_simu 
-    rownames(AF_ts_simu) = periods
-    
-    # Attributions for each temperature range group
-    idx_groups = sapply(temp_groups, group_threshold, data_pred$temp, MMT_postmeta[[r]], pred_thresholds_MOV[,r], 1:n_periods)
-    filter_cols = array(FALSE, dim=c(n_periods,n_groups), dimnames=list(periods, temp_groups))
-    for (g in 1:n_groups) { filter_cols[idx_groups[[g]] , g] = TRUE }
-    AF_ts_simu = do.call(dplyr::bind_cols, list(AF_ts_simu, filter_cols)) 
-    
-    # reg_foldout = paste0(foldout_attr,"/", info_region$code[r])
-    # if( !file_test( "-d", reg_foldout ) ){ dir.create( file.path(reg_foldout)); }
-    # pqt_filepath = tempfile(tmpdir=reg_foldout, fileext=".gzip.parquet")
-    # write_parquet(AF_ts_simu, sink=pqt_filepath, compression="gzip")           # faster than snappy
-    
-    saveRDS( AF_ts_simu, paste0(foldout_attr, "/", info_region$code[r], ".rds") )
-  }
-  rm(filter_cols, AF_ts_simu)
-  end = Sys.time()
-  print(end-start)
-
-} else {
-  print("not required")
 }
+

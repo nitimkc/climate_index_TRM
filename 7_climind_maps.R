@@ -185,7 +185,7 @@ for (season in seasons) {
   
   fill_var = c("Total Heat", "Moderate Heat", "Extreme Heat", "Total Cold", "Moderate Cold", "Extreme Cold", "Total")
   grps  = 1: length(temp_groups)       # all temp groups
-  attr = AF_NAO[-seq_len(geo_idx),val,grps,ssn_idx,]/100
+  attr = AF_NAO[-seq_len(geo_idx),val,grps,ssn_idx,]#/100
   
   for (phs in 0:2) { 
     start_time = Sys.time()   # ~2 mins
@@ -194,7 +194,7 @@ for (season in seasons) {
       phase_name = "_diff" 
       plot_df = as.data.frame( attr[,,2] - attr[,,1] ) # neg means positive phase has higher AF # how to handle NA
       breaks  = cbreaks(range(plot_df, na.rm=TRUE), breaks_pretty(10))$breaks
-      palette = "-RdBu"
+      palette = "brewer.rd_bu" #"-RdBu"
       plot_df[, colnames(sig)[grps]] = ifelse(sig[,grps,season]==T, "*", "")
       plot_df[, colnames(sig)[grps]][is.na(plot_df[, colnames(sig)[grps]])] = ""
       sig_var = paste0("sig ", fill_var)

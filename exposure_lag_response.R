@@ -96,33 +96,59 @@ crossbasis_model <- function(mort_temp, degr_f, temp_knots, func_temp,
                "QAIC"        = model_qaic ) )
 }
 
-
-min_mort_temp <- function(cross_pred, local_min_MMT, temp, percentile_MMT, all_temp){
-  "cross_pred: 
+min_mort_temp <- function(allRRfit, local_min_MMT, min_MMT, max_MMT){
+  "RRfit: 
    local_min_MMT: 
-   percentile_MMT: 
-   all_temp:
+   pred: 
+   min_MMT:
+   max_MMT:
    
    TO DO - ADD OBJECTIVE"
+  MMT_minima = 1 + which( diff( sign( diff(allRRfit) ) ) == 2 )
   
-  MMT_minima = 1 + which( diff( sign( diff(cross_pred$allRRfit) ) ) == 2 )
-
   if( local_min_MMT & length(MMT_minima) > 0 ){
     # if at least one local minima exists, MMT is one with lowest relative risk
-    MMT = cross_pred$predvar[ MMT_minima[ which.min( cross_pred$allRRfit[MMT_minima] ) ] ]
+    MMT = MMT_minima[ which.min( allRRfit[MMT_minima] ) ]
   }else{
     # if no local minima exists, MMT is one with the lowest relative risk within a predefined temperature percentile range
     # // NM ?? any value that has the lowest relative risk within the desired temperature range
-    min_MMT =      which( all_temp >= quantile( temp, percentile_MMT[[1]], na.rm=TRUE ) )  [1]
-    max_MMT = rev( which( all_temp <= quantile( temp, percentile_MMT[[2]], na.rm=TRUE ) ) )[1]
-    MMT = cross_pred$predvar[ min_MMT - 1 + which.min( cross_pred$allRRfit[min_MMT:max_MMT] ) ]
+    MMT = min_MMT - 1 + which.min( allRRfit[min_MMT:max_MMT] )
   }
   
   return(MMT)
 }
 
 
-crosspred_premeta <- function(reg, cb_temp, model, all_temp, temp_quantiles, temp, 
+# min_mort_temp <- function(cross_pred, local_min_MMT, temp, percentile_MMT, all_temp){
+#   "cross_pred:
+#    local_min_MMT:
+#    percentile_MMT:
+#    all_temp:
+# 
+#    TO DO - ADD OBJECTIVE"
+# 
+#   MMT_minima = 1 + which( diff( sign( diff(cross_pred$allRRfit) ) ) == 2 )
+# 
+#   if( local_min_MMT & length(MMT_minima) > 0 ){
+#     # if at least one local minima exists, MMT is one with lowest relative risk
+#     MMT = cross_pred$predvar[ MMT_minima[ which.min( cross_pred$allRRfit[MMT_minima] ) ] ]
+#   }else{
+#     # if no local minima exists, MMT is one with the lowest relative risk within a predefined temperature percentile range
+#     # // NM ?? any value that has the lowest relative risk within the desired temperature range
+#     min_MMT =      which( all_temp >= quantile( temp, percentile_MMT[[1]], na.rm=TRUE ) )  [1]
+#     max_MMT = rev( which( all_temp <= quantile( temp, percentile_MMT[[2]], na.rm=TRUE ) ) )[1]
+#     MMT = cross_pred$predvar[ min_MMT - 1 + which.min( cross_pred$allRRfit[min_MMT:max_MMT] ) ]
+#   }
+# 
+#   return(MMT)
+# }
+
+# 
+# model =model_cbasis$model
+# alltemp=all_temp[[reg]]
+# temp=data_calib$temp
+# local_min_MMT=CONFIG$LOCAL_MIN_MMT
+crosspred_premeta <- function(reg, cb_temp, model, alltemp, temp_quantiles, temp, 
                               local_min_MMT, min_PMMT, max_PMMT){
   "reg: A string representing the region code for which the model is passed
    cb_temp: 
@@ -140,15 +166,20 @@ crosspred_premeta <- function(reg, cb_temp, model, all_temp, temp_quantiles, tem
   # -----------------
   cross_pred = crosspred( cb_temp, model,
                           model.link = "log",
-                          at         = all_temp, bylag = 1,
-                          cen        = mean(temp, na.rm=TRUE) );
-  if( length(cross_pred$predvar) != length(all_temp) ){
+                          at         = alltemp, bylag = 1,
+                          cen        = mean(temp, na.rm=TRUE) )
+  if( length(cross_pred$predvar) != length(alltemp) ){
     stop( paste0("Length of data and cross prediction (without centering) is not equal for ", reg, " region !!!" ) ); 
   }
   
   # with centering
   # --------------
-  MMT = min_mort_temp( cross_pred, local_min_MMT, temp, c(min_PMMT,max_PMMT), all_temp )
+  min_MMT =      which( alltemp >= quantile( temp, min_PMMT, na.rm=TRUE ) )  [1]
+  max_MMT = rev( which( alltemp <= quantile( temp, max_PMMT, na.rm=TRUE ) ) )[1]
+  MMT_idx = min_mort_temp( cross_pred$allRRfit, local_min_MMT, min_MMT, max_MMT)
+  MMT = cross_pred$predvar[MMT_idx]
+  
+  # MMT = min_mort_temp( cross_pred, local_min_MMT, temp, c(min_PMMT,max_PMMT), all_temp )
   cross_pred = crosspred( cb_temp, model, model.link = "log", bylag = 1,
                           at         = temp_quantiles,
                           cen        = MMT); # MMT to be calculated at temperature centiles, rather than actual values

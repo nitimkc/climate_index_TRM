@@ -66,27 +66,30 @@ simulated_attributable_values <- function(ob_temp, blup_coeff, blup_covar, seed,
   return(data.table(attributions)) # ?? faster sapply operation
 }
 
-get_geo_groups <- function(data, summary_map){
+
+get_geo_groups <- function(data, round_by, conf_int, n_groups, save, filename) {
   
-  data = as.data.frame(data)
-  cols = colnames(data)
-  data$popn = plyr::mapvalues(rownames(data), from=summary_map$code, to=summary_map$popn24)
-  data$ctry_code = plyr::mapvalues(rownames(data), from=summary_map$code, to=summary_map$country_code)
-  data$EU_regions = plyr::mapvalues(rownames(data), from=summary_map$code, to=summary_map$eea_subregion)
+  attr = round(data[,,'attr'], round_by)
+  attr_confint = round(apply(data[,,1:n_simu], c(1,2), quantile, conf_int), round_by) 
+  attr_confint_all = abind::abind(attr, attr_confint, along=1)  
+  dimnames(attr_confint_all)[[1]][1] = "attr"
+
+  df = data.frame( matrix(ncol=1 + dim(attr_confint_all)[3], 
+                          nrow=    dim(attr_confint_all)[2] ) )
+  colnames(df) = c("Region", dimnames(attr_confint_all)[[3]])
+  df$Region = dimnames(attr_confint_all)[[2]]
   
-  countries = data %>% group_by(ctry_code) %>% 
-    # summarise( across(cols, mean) ) %>% 
-    summarise( across(cols, ~ mean(.x, na.rm=TRUE)) ) %>% 
-    column_to_rownames(var="ctry_code")
-  
-  EU_regions = data %>% group_by(EU_regions) %>% 
-    # summarise( across(cols, mean) ) %>%
-    summarise( across(cols, ~ mean(.x, na.rm=TRUE)) ) %>% 
-    column_to_rownames(var="EU_regions")
-  
-  summarized = abind::abind(EU_regions, countries, data[,cols], along=1)
-  return(summarized)
+  for (g in 1:n_groups) {
+    print(g)
+    g_vals = apply(attr_confint_all[,,g], 1, function(x) as.vector(t(x)))
+    df[,g+1] = paste0(g_vals[,1], " (", g_vals[,2], ", ", g_vals[,3], ")")
+  }
+  if (save==TRUE){
+    write.csv(df, paste0(foldout, filename, ".csv"), row.names = FALSE)
+  }
+  return(df)
 }
+
 
 get_confidence_interval <- function(attr){
   

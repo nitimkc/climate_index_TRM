@@ -12,6 +12,7 @@
 # ------------------------------------------------------------------------------
 # REQUIRED LIBRARIES, FUNCTIONS AND CONFIG
 # ------------------------------------------------------------------------------
+
 if (!require("pacman")) install.packages("pacman")
 pacman::p_load(config, dlnm, mixmeta, stargazer)
 
@@ -85,76 +86,72 @@ lag_knots  = logknots( c( MIN_LAG, MAX_LAG ), 3 )
 DF_SEAS = CONFIG$DF_SEASONALITY # df/yr for the seasonal and long-term trends
 if( DF_SEAS <= 0 ) { stop(paste0("Invalid degree of freedom for seasonality ", DF_SEAS)); }
 
+n_curves = 1 + length(lrf_centile_idx) # Cum. ERF and LRF at min/max
+n_curves_names = c("CUMU", sprintf("P%03g", 100*centiles[lrf_centile_idx]))
+
+temp_quantiles =  lapply(calib_mort_temp, function(x) quantile( x$temp, centiles, na.rm=TRUE ))
+
 
 # ------------------------------------------------------------------------------
-# OBTAIN LOCATION-SPECIFIC ASSOCIATIONS
+# STAGE 1. OBTAIN LOCATION-SPECIFIC ASSOCIATIONS
 # ------------------------------------------------------------------------------
-
-# //NM four?? coefficients for each regions to be used for meta analysis
-# //NM covariances to incorporate the uncertainties of the model
 
 n_regions   = length(info_region$code)
 region_list = list(info_region$code)
 qaic = MMT  =  array( NA, dim=n_regions, dimnames=region_list )
 crpred_premeta = vector( "list", n_regions ); names(crpred_premeta) = info_region$code
-
-n_curves = 1 + length(lrf_centile_idx) # Cum. ERF and LRF at min/max
-n_curves_names = c("CUMU", sprintf("P%03g", 100*centiles[lrf_centile_idx]))
 coeff = covar = vector( "list", n_curves ); names(coeff) = names(covar) = n_curves_names
 for (i in 1:n_curves) {
   covar[[i]] = vector( "list", n_regions); names(covar[[i]]) = info_region$code
 }
-
 # for each curve in each region number of coeffs
 if (SPLINE_TYPE == "ns") { n_coeff_ERF = length(temp_knots) + 1
 } else                   { n_coeff_ERF = length(temp_knots) + spline_degree }
 n_coeff_LRF = length(lag_knots) + 2 
 for (i in 1:n_curves) {
-  if (i == 1) { coeff[[i]] = matrix(NA, n_regions, n_coeff_ERF, dimnames=region_list)
-  } else      { coeff[[i]] = matrix(NA, n_regions, n_coeff_LRF, dimnames=region_list)
+  if (i == 1) { coeff[[i]] = matrix(NA, n_regions, n_coeff_ERF, dimnames=region_list) # ERF
+  } else      { coeff[[i]] = matrix(NA, n_regions, n_coeff_LRF, dimnames=region_list) # LRF
   }
 }
+# coefficients for each regions to be used for meta analysis
+# covariances to incorporate the uncertainties of the model
 
 print("Calculating Location-Specific Associations")
 # -------------------------------------------------
-temp_quantiles =  lapply(mort_temp_calib, function(x) quantile( x$temp, centiles, na.rm=TRUE ))
-
 start_time = Sys.time() # 48.14179 mins remote
 for (r in 1:n_regions) {
   reg = info_region$code[r]
   print( paste0( "  Region ", r, " / ", n_regions, ": ", info_region$name[r], " (", reg, ")" ) );
-  data_calib = calib_mort_temp[[r]]
+  data_calib = calib_mort_temp[[reg]]
   
   # 1. models, predictions, cross-basis, error
   model_seasonality = seasonality_model(reg, data_calib, DF_SEAS)
   model_cbasis      = crossbasis_model(data_calib, DF_SEAS, temp_knots, SPLINE_TYPE, 
                                        spline_degree, MIN_LAG, MAX_LAG, lag_knots)
-  calib_mort_temp[[r]]$pred_seas   = model_seasonality$prediction
-  calib_mort_temp[[r]]$pred_cbasis = model_cbasis$prediction
+  calib_mort_temp[[reg]]$pred_seas   = model_seasonality$prediction
+  calib_mort_temp[[reg]]$pred_cbasis = model_cbasis$prediction
   
   cb_temp = model_cbasis$crossbasis
-  qaic[r] = model_cbasis$QAIC 
+  qaic[reg] = model_cbasis$QAIC 
   
   # 2. premeta cross predictions, MMT 
-  temp_quantiles  = quantile( data_calib$temp, centiles, na.rm=TRUE )
-  cross_pred = crosspred_premeta(reg, cb_temp, model_cbasis$model, 
-                                 all_temp[[r]], temp_quantiles, data_calib$temp, 
+  cross_pred = crosspred_premeta(reg, cb_temp, model_cbasis$model,all_temp[[reg]], 
+                                 temp_quantiles[[reg]], data_calib$temp,
                                  CONFIG$LOCAL_MIN_MMT, min_PMMT, max_PMMT)
-  MMT[[r]]            = cross_pred$MMT
-  crpred_premeta[[r]] = cross_pred$cross_pred
+  MMT[[reg]]            = cross_pred$MMT
+  crpred_premeta[[reg]] = cross_pred$cross_pred
   
   # 3. Reduced Coefficients and Covariance
-  creduced_erf     = cross_reduced(cb_temp, model_cbasis$model, MMT[[r]])  # for Cum. ERF
-  i = 1
-  coeff[[1]][r, ]  = creduced_erf$coeff # ?? To DO if $ used instead of numeric index does it work?
-  covar[[1]][[r]]  = creduced_erf$vcov
-  
-  for( i in 2:n_curves ) {                                     # for each LRF # length(lrf_centile_idx)
-    predictor_quantile  = quantile( data_calib$temp, centiles[lrf_centile_idx[i]], na.rm = TRUE ) 
-    predictor_value     = predictor_quantile + ( (-1) ^ ( centiles[lrf_centile_idx[i]] < 0.500 ) ) * 0.1 * (predictor_quantile == MMT[[r]])
-    creduced_lrf        = cross_reduced(cb_temp, model_cbasis$model, MMT[[r]], type="var", value=predictor_value)
-    coeff[[i]][r,]  = creduced_lrf$coeff 
-    covar[[i]][[r]] = creduced_lrf$vcov 
+  for( i in 1:n_curves ) {                                     
+    if( i == 1 ){ # for Cum. ERF
+      creduced     = cross_reduced(cb_temp, model_cbasis$model, MMT[[reg]])
+    } else      { # for each LRF # length(lrf_centile_idx)
+      predictor_quantile  = quantile( data_calib$temp, centiles[lrf_centile_idx[i-1]], na.rm = TRUE ) 
+      predictor_value     = predictor_quantile + ( (-1) ^ ( centiles[lrf_centile_idx[i-1]] < 0.500 ) ) * 0.1 * (predictor_quantile == MMT[[reg]])
+      creduced            = cross_reduced(cb_temp, model_cbasis$model, MMT[[reg]], type="var", value=predictor_value)
+    }
+    coeff[[i]][reg, ]  = creduced$coeff # ?? To DO if $ used instead of numeric index does it work?
+    covar[[i]][[reg]]  = creduced$vcov
   }
 }
 end_time = Sys.time()
@@ -171,47 +168,63 @@ saveRDS( crpred_premeta,  paste0(foldout, "crpred_premeta.rds") )
 saveRDS( coeff,           paste0(foldout, "coeff.rds") )
 saveRDS( covar,           paste0(foldout, "covar.rds") )
 saveRDS( cb_temp_arglag,  paste0(foldout, "cb_temp_arglag.rds") )
-# saveRDS( creduced_erf,   paste0(foldout, "creduced_erf.rds") )
-# saveRDS( creduced_lrf,   paste0(foldout, "creduced_lrf.rds") )
 
 
 # ------------------------------------------------------------------------------
-# BLUP for Cum. ERF and LRF at min/max
+# STAGE 2. Mixmeta and BLUP for Cum. ERF and LRF at min/max
 # ------------------------------------------------------------------------------
-
-# meta predictors
-temp_ann = sapply( mort_temp_calib, function(x) mean(x$temp, na.rm=TRUE) ) # annual temp 
-temp_IQR = sapply( mort_temp_calib, function(x)  IQR(x$temp, na.rm=TRUE) ) # temp quantile
-
-# temp_win = sapply( mort_temp_calib, function(x) mean( x$temp[12<=month(x$date) | month(x$date)<=2], na.rm=TRUE ) ); # ??
-# temp_sum = sapply( mort_temp_calib, function(x) mean( x$temp[ 6<=month(x$date) & month(x$date)<=8], na.rm=TRUE ) );
-# temp_p01 = sapply( mort_temp_calib, function(x) quantile( x$temp, 0.01, na.rm=TRUE ) ); 
-# temp_p99 = sapply( mort_temp_calib, function(x) quantile( x$temp, 0.99, na.rm=TRUE ) ); 
-# names(temp_p01) = names(temp_p99) = info_region$code
-# ?? TO DO - get correlation between metapredictors
 
 # mixmeta and BLUPs for each curve
 mvar_postmeta = blup_postmeta = vector("list", n_curves)
-names(mvar_postmeta) = names(blup_postmeta) = names(coeff) 
+names(mvar_postmeta) = names(blup_postmeta) = n_curves_names
 
+# meta predictors
+temp_ann = sapply( calib_mort_temp, function(x) mean(x$temp, na.rm=TRUE) ) # annual temp 
+temp_IQR = sapply( calib_mort_temp, function(x)  IQR(x$temp, na.rm=TRUE) ) # temp quantile
+
+# temp_win = sapply( calib_mort_temp, function(x) mean( x$temp[12<=month(x$date) | month(x$date)<=2], na.rm=TRUE ) ); # ??
+# temp_sum = sapply( calib_mort_temp, function(x) mean( x$temp[ 6<=month(x$date) & month(x$date)<=8], na.rm=TRUE ) );
+# temp_p01 = sapply( calib_mort_temp, function(x) quantile( x$temp, 0.01, na.rm=TRUE ) ); 
+# temp_p99 = sapply( calib_mort_temp, function(x) quantile( x$temp, 0.99, na.rm=TRUE ) ); 
+# names(temp_p01) = names(temp_p99) = info_region$code
+# ?? TO DO - get correlation between metapredictors
+
+print("Fitting Mixmeta")
+# ----------------------
 start_time = Sys.time() # 1.326498 hours, 33.07614 mins remote
-for( i in 1:length(coeff) ) {
-  print( paste0("Multivariate Meta-Analysis - ", i, ".", names(coeff)[i]) )
+for (i in 1:n_curves ) {
+  print( paste0("Multivariate Meta-Analysis - ", i, ".", n_curves_names[i]) )
   
-  # 1. arguments for mixmeta model
-  meta_arg = list( formula = coeff[[i]] ~ temp_ann + temp_IQR, 
-                   S       = covar[[i]],
-                   data    = data.table(reg=info_region$code),
-                   control = list(showiter=TRUE, igls.inititer=10, maxiter=CONFIG$MAX_ITER),
-                   method  = "reml" )
+  # 1. mixmeta model
   if( as.logical(CONFIG$COUNTRY_RANDOM_EFFECT) ) { 
-    meta_arg = c(meta_arg, 
-                 list( random  =~ 1 | factor(info_region$country_code)/factor(info_region$code) )) }
+    mixmeta_model = mixmeta( formula = coeff[[i]] ~ temp_ann + temp_IQR, 
+                             S       = covar[[i]],
+                             data    = data.table(reg=info_region$code),
+                             control = list(showiter=TRUE, igls.inititer=10, maxiter=CONFIG$MAX_ITER),
+                             method  = "reml",
+                             random =~ 1 | factor(info_region$country_code)/factor(info_region$code) )
+  } else {
+    mixmeta_model = mixmeta( formula = coeff[[i]] ~ temp_ann + temp_IQR, 
+                             S       = covar[[i]],
+                             data    = data.table(reg=info_region$code),
+                             control = list(showiter=TRUE, igls.inititer=10, maxiter=CONFIG$MAX_ITER),
+                             method  = "reml")
+  }
   
-  # 2. mixmeta model
-  mixmeta_model = do.call( mixmeta, meta_arg )
+  # # 1. arguments for mixmeta model
+  # meta_arg = list( formula = coeff[[i]] ~ temp_ann + temp_IQR, 
+  #                  S       = covar[[i]],
+  #                  data    = data.table(reg=info_region$code),
+  #                  control = list(showiter=TRUE, igls.inititer=10, maxiter=CONFIG$MAX_ITER),
+  #                  method  = "reml" )
+  # if( as.logical(CONFIG$COUNTRY_RANDOM_EFFECT) ) { 
+  #   meta_arg = c(meta_arg, 
+  #                list( random  =~ 1 | factor(info_region$country_code)/factor(info_region$code) )) }
+  # 
+  # # 2. mixmeta model
+  # mixmeta_model = do.call( mixmeta, meta_arg )
+  
   mvar_postmeta[[i]] = mixmeta_model
-  
   model_summary = summary( mixmeta_model)
   # print(model_summary)
   
@@ -219,7 +232,7 @@ for( i in 1:length(coeff) ) {
   print( paste0("Mixmeta coeffs", model_summary$coefficients ) )
   print( paste0("Mixmeta AIC & BIC ", model_summary$AIC, model_summary$BIC ) )
   
-  # 3. wald test of the predictors of mixmeta model
+  # 2. wald test of the predictors of mixmeta model
   if( length(mixmeta_coeff)  > 1 ) { 
     for( p in 1:length(mixmeta_coeff)  ) {
       fwald_estimate = FWALD(mvar_postmeta[[i]], mixmeta_coeff[p])
@@ -227,8 +240,9 @@ for( i in 1:length(coeff) ) {
                    sprintf( "%.10f", fwald_estimate )) ); }
   } else { print(paste0("Mixmeta has only one predictor", mixmeta_coeff)) }
   
-  # 4. BLUP for each curve using the mixmeta mvar?? and covar # ??
+  # 3. BLUP for each curve using the mixmeta mvar?? and covar # ??
   blup_postmeta[[i]] = blup( mvar_postmeta[[i]], vcov = TRUE )
+  names(blup_postmeta[[i]]) = info_region$code
 }
 end_time = Sys.time();
 print(end_time-start_time);
@@ -238,3 +252,55 @@ saveRDS( mvar_postmeta, paste0(foldout, "mvar_postmeta.rds") )
 saveRDS( blup_postmeta, paste0(foldout, "blup_postmeta.rds") )
 # saveRDS( temp_ann,      paste0(foldout, "temp_ann.rds") )
 # saveRDS( temp_IQR,      paste0(foldout, "temp_IQR.rds") )
+
+
+# ------------------------------------------------------------------------------
+# BLUP for Aggregated Regions (Europe + Countries)
+# ------------------------------------------------------------------------------
+
+eea_subregions = unique(info_region$eea_subregion)
+countries = unique(info_region$country_code)
+dimnames_agg = list(unlist(list(c("Europe"), eea_subregions, countries)))
+ndims_agg = c(1, length(eea_subregions), length(countries)) 
+nregions_agg = sum(ndims_agg)
+
+blup_postmeta_agg = vector( "list", n_curves ); names(blup_postmeta_agg) = n_curves_names
+for (i in 1:n_curves) {
+  blup_postmeta_agg[[i]] = vector("list", nregions_agg); names(blup_postmeta_agg[[i]]) = dimnames_agg[[1]]
+}
+
+print("Obtaining BLUP for Aggregated Regions using mixmeta")
+# ----------------------------------------------------------
+start_time = Sys.time()
+for (i in 1:n_curves ) {
+  print( paste0("Multivariate Meta-Analysis - ", i, ".", n_curves_names[i]) )
+  
+  # meta predictors for each regionally aggregated data
+  for (r_agg in dimnames_agg[[1]]) {
+    print(paste0("  ", r_agg))
+    if (r_agg == "Europe") {
+      temp_ann_agg = mean(temp_ann)
+      temp_IQR_agg = mean(temp_IQR)
+    } else {
+      if (r_agg %in% eea_subregions) {
+        agg_idx = (info_region$eea_subregion==r_agg)
+      } else if (r_agg %in% countries) {
+        agg_idx = (info_region$country_code==r_agg)
+      } else {
+        print(paste0("Aggregated Region name not in data: ", r_agg)) 
+      }
+      temp_ann_agg = mean( temp_ann[agg_idx] )
+      temp_IQR_agg = mean( temp_IQR[agg_idx] )
+    }
+    new_data = data.table(temp_ann = mean( temp_ann_agg),
+                          temp_IQR = mean( temp_IQR_agg ) )
+    
+    # 1. get predictions on this new aggregated data using mvar postmeta 
+    blup_postmeta_agg[[i]][[r_agg]] = predict(mvar_postmeta[[i]], new_data, vcov=TRUE, format="list")
+  }
+}
+end_time = Sys.time();
+print(end_time-start_time);
+
+# save results
+saveRDS( blup_postmeta_agg, paste0(foldout, "blup_postmeta_agg.rds") )
